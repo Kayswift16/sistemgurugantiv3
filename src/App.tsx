@@ -50,7 +50,6 @@ const App: React.FC = () => {
     
     const absentTeacherIds = new Set(absentTeachers.map(t => t.id).filter(id => id));
     
-    // Teachers assigned to other slots at the same time
     const alreadySubstitutingIds = new Set(
       substitutionPlan
         ?.filter((s, i) => s.time === time && i !== subIndex && s.substituteTeacherId !== 'LAIN_LAIN')
@@ -143,7 +142,6 @@ const App: React.FC = () => {
     try {
       const plan = await generateSubstitutionPlan(absentTeachersWithData, TEACHERS, TIMETABLE, dayName);
 
-      // Resolve substitution conflicts to prevent double-booking
       const resolvedPlan: Substitution[] = [];
       const assignmentsByTime: Record<string, Set<string>> = {};
 
@@ -159,7 +157,6 @@ const App: React.FC = () => {
         const assignedSubstitutesForSlot = assignmentsByTime[time];
 
         if (sub.substituteTeacherId !== 'LAIN_LAIN' && assignedSubstitutesForSlot.has(sub.substituteTeacherId)) {
-          // Conflict: The suggested teacher is already assigned at this time. Find a new one.
           const busyNow = new Set([
             ...TIMETABLE.filter(e => e.day.toUpperCase() === day.toUpperCase() && e.time === time).map(e => e.teacherId),
             ...absentTeachersWithData.map(t => t.teacher.id),
@@ -185,7 +182,6 @@ const App: React.FC = () => {
             });
           }
         } else {
-          // No conflict
           resolvedPlan.push(sub);
           if (sub.substituteTeacherId !== 'LAIN_LAIN') {
               assignmentsByTime[time].add(sub.substituteTeacherId);
@@ -270,6 +266,16 @@ const App: React.FC = () => {
     } finally {
         if (wasEditing) setIsEditing(true);
     }
+  };
+
+  const handleCreateNewPlan = () => {
+    setSubstitutionPlan(null);
+    setReportInfo(null);
+    setError(null);
+    setIsEditing(false);
+    setAbsentTeachers([{ key: `teacher-${Date.now()}`, id: '', reason: '' }]);
+    setAbsenceDate('');
+    setPreparerName('');
   };
   
   const selectedTeacherIds = new Set(
@@ -362,8 +368,11 @@ const App: React.FC = () => {
             {substitutionPlan && (
               <div>
                 <div className="flex flex-col sm:flex-row justify-between sm:items-center mb-6 gap-4">
-                  <h2 className="text-2xl font-bold text-slate-700">Cadangan Pelan Guru Ganti</h2>
+                    <div className="flex-grow">
+                        <h2 className="text-2xl font-bold text-slate-700">Cadangan Pelan Guru Ganti</h2>
+                    </div>
                   <div className="flex gap-2 flex-shrink-0">
+                    <button onClick={handleCreateNewPlan} className="font-semibold py-2 px-4 rounded-lg border bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200 transition">Buat Pelan Baru</button>
                     <button onClick={() => setIsEditing(!isEditing)} className={`font-semibold py-2 px-4 rounded-lg border transition ${isEditing ? 'bg-sky-600 text-white border-sky-600' : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'}`}>{isEditing ? 'Selesai' : 'Ubah Pelan'}</button>
                     <button onClick={handleDownloadPdf} className="bg-emerald-600 text-white font-semibold py-2 px-4 rounded-lg border border-emerald-600 hover:bg-emerald-700 transition flex items-center gap-2">
                       <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
