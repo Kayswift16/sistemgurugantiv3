@@ -1,6 +1,6 @@
-import React, { useState, useCallback, useRef } from 'react';
-import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
+import React, { useState, useCallback } from 'react';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
 import { TEACHERS, TIMETABLE } from '@/constants';
 import { Teacher, Substitution, AbsentTeacherInfo } from '@/types';
 import { generateSubstitutionPlan } from '@/services/geminiService';
@@ -21,7 +21,6 @@ const App: React.FC = () => {
   const [substitutionPlan, setSubstitutionPlan] = useState<Substitution[] | null>(null);
   const [reportInfo, setReportInfo] = useState<{ date: Date; day: string; absentTeachers: { name: string; reason: string }[] } | null>(null);
   const [isEditing, setIsEditing] = useState<boolean>(false);
-  const pdfContentRef = useRef<HTMLDivElement>(null);
 
   const handleTeacherChange = (index: number, field: 'id' | 'reason', value: string) => {
     const newAbsentTeachers = [...absentTeachers];
@@ -70,7 +69,7 @@ const App: React.FC = () => {
       newPlan[subIndex] = {
         ...newPlan[subIndex],
         substituteTeacherId: 'LAIN_LAIN',
-        substituteTeacherName: '', // Clear name to allow manual input
+        substituteTeacherName: '',
         justification: 'Ditentukan secara manual.',
       };
     } else {
@@ -141,7 +140,7 @@ const App: React.FC = () => {
     try {
       const plan = await generateSubstitutionPlan(absentTeachersWithData, TEACHERS, TIMETABLE, dayName);
 
-      // Resolve substitution conflicts
+      // Selesaikan pertindihan
       const resolvedPlan: Substitution[] = [];
       const assignmentsByTime: Record<string, Set<string>> = {};
 
@@ -157,7 +156,7 @@ const App: React.FC = () => {
         const assignedSubstitutesForSlot = assignmentsByTime[time];
 
         if (assignedSubstitutesForSlot.has(sub.substituteTeacherId)) {
-          // Conflict: Find a new substitute
+          // Cari alternatif
           const busyNow = new Set([
             ...TIMETABLE.filter(e => e.day.toUpperCase() === day.toUpperCase() && e.time === time).map(e => e.teacherId),
             ...absentTeachersWithData.map(t => t.teacher.id),
@@ -183,7 +182,7 @@ const App: React.FC = () => {
             });
           }
         } else {
-          // No conflict
+          // Tiada konflik
           resolvedPlan.push(sub);
           if (sub.substituteTeacherId !== 'LAIN_LAIN') {
             assignmentsByTime[time].add(sub.substituteTeacherId);
@@ -205,80 +204,80 @@ const App: React.FC = () => {
     }
   }, [absentTeachers, absenceDate]);
 
-  // === BARU: PDF stabil menggunakan jsPDF + autoTable (bukan html2canvas) ===
+  // === PDF BARU: guna jsPDF + autoTable (stabil di mobile/desktop) ===
   const handleDownloadPdf = () => {
-    if (!substitutionPlan || !reportInfo) {
-      setError('Tiada data untuk dimuat turun.');
-      return;
-    }
+    if (!substitutionPlan || !reportInfo) return;
 
-    const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const pageWidth = doc.internal.pageSize.getWidth();
-    const pageHeight = doc.internal.pageSize.getHeight();
-    const marginX = 40;
+    const marginX = 14;
 
-    // Tajuk
+    // Header
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(16);
-    doc.text('Jadual Guru Ganti', pageWidth / 2, 40, { align: 'center' });
+    doc.setFontSize(14);
+    doc.text('Jadual Guru Ganti', pageWidth / 2, 15, { align: 'center' });
 
-    // Info ringkas
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(10);
-    const tarikh = reportInfo.date.toLocaleDateString('ms-MY', { day: 'numeric', month: 'long', year: 'numeric' });
-    const hari = reportInfo.date.toLocaleDateString('ms-MY', { weekday: 'long' });
-    doc.text(`Disediakan Oleh: ${preparerName || 'Tidak Dinyatakan'}`, marginX, 60);
-    doc.text(`Tarikh: ${tarikh}`, marginX, 74);
-    doc.text(`Hari: ${hari}`, marginX, 88);
+
+    const infoY = 24;
+    doc.text(`Disediakan Oleh: ${preparerName || 'Tidak Dinyatakan'}`, marginX, infoY);
+    doc.text(`Tarikh: ${reportInfo.date.toLocaleDateString('ms-MY', { day: 'numeric', month: 'long', year: 'numeric' })}`, marginX, infoY + 6);
+    doc.text(`Hari: ${reportInfo.date.toLocaleDateString('ms-MY', { weekday: 'long' })}`, marginX, infoY + 12);
 
     // Senarai guru tidak hadir
-    let startY = 108;
+    let absentY = infoY + 22;
     doc.setFont('helvetica', 'bold');
-    doc.text('Senarai Guru Tidak Hadir:', marginX, startY);
+    doc.text('Senarai Guru Tidak Hadir:', marginX, absentY);
     doc.setFont('helvetica', 'normal');
-    startY += 14;
-    reportInfo.absentTeachers.forEach((t, i) => {
-      doc.text(`${i + 1}. ${t.name} (${t.reason})`, marginX + 8, startY);
-      startY += 14;
-    });
+
+    absentY += 6;
+    if (reportInfo.absentTeachers.length === 0) {
+      doc.text('- Tiada -', marginX, absentY);
+      absentY += 6;
+    } else {
+      reportInfo.absentTeachers.forEach((t, i) => {
+        doc.text(`${i + 1}. ${t.name} (${t.reason})`, marginX, absentY);
+        absentY += 6;
+      });
+    }
 
     // Jadual utama
-    const head = [['Masa', 'Kelas', 'Subjek', 'Guru Tidak Hadir', 'Guru Ganti', 'Justifikasi']];
-    const body = substitutionPlan.map((s) => [
-      s.time,
-      s.class,
-      s.subject,
-      s.absentTeacherName,
-      s.substituteTeacherName || (s.substituteTeacherId === 'LAIN_LAIN' ? 'Lain-lain' : ''),
-      s.justification || ''
-    ]);
+    const head = [['Masa', 'Kelas', 'Subjek', 'Guru Tidak Hadir', 'Guru Ganti']];
+    const body = substitutionPlan.map((sub) => {
+      const ganti =
+        sub.substituteTeacherName ||
+        (sub.substituteTeacherId === 'LAIN_LAIN' ? '(Nama belum diisi)' : '');
+      return [sub.time, sub.class, sub.subject, sub.absentTeacherName, ganti];
+    });
 
-    autoTable(doc, {
+    const startY = Math.max(absentY + 4, 20);
+
+    (doc as any).autoTable({
       head,
       body,
-      startY: Math.min(startY + 10, pageHeight - 200),
-      theme: 'grid',
-      margin: { left: marginX, right: marginX },
-      styles: { fontSize: 9, cellPadding: 4, overflow: 'linebreak' },
-      headStyles: { fillColor: [241, 245, 249], textColor: 30, halign: 'left' },
-      didDrawPage: (data) => {
-        // Footer pada setiap halaman
+      startY,
+      styles: { fontSize: 9, cellPadding: 2 },
+      headStyles: { fillColor: [241, 245, 249], textColor: [71, 85, 105] }, // slate-100 / slate-600
+      didDrawPage: (data: any) => {
+        // Footer tengah
+        const footerText = 'Dijana menggunakan Sistem Guru Ganti SK Long Sebangang';
         doc.setFontSize(8);
         doc.setTextColor(128);
-        const footer = 'Dijana menggunakan Sistem Guru Ganti SK Long Sebangang';
-        doc.text(footer, pageWidth / 2, pageHeight - 16, { align: 'center' });
-        // Nombor halaman
-        doc.text(`Halaman ${data.pageNumber}`, pageWidth - marginX, pageHeight - 16, { align: 'right' });
-      },
+        doc.text(footerText, pageWidth / 2, doc.internal.pageSize.getHeight() - 7, { align: 'center' });
+
+        // Nombor halaman kanan bawah
+        const pageNumber = `${doc.internal.getNumberOfPages ? doc.internal.getNumberOfPages() : (doc as any).internal.pages.length}`;
+        doc.setTextColor(100);
+        doc.text(`Halaman ${data.pageNumber}`, pageWidth - marginX, doc.internal.pageSize.getHeight() - 7, { align: 'right' });
+      }
     });
 
     doc.save('pelan-guru-ganti.pdf');
   };
 
   const selectedTeacherIds = new Set(
-    absentTeachers
-      .map(t => t.id)
-      .filter(id => id)
+    absentTeachers.map(t => t.id).filter(id => id)
   );
 
   return (
@@ -371,7 +370,7 @@ const App: React.FC = () => {
                           className="w-full h-full flex items-center justify-center text-red-500 hover:text-red-700 disabled:text-slate-300 disabled:cursor-not-allowed transition"
                           aria-label="Padam Guru"
                         >
-                          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
+                          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
                         </button>
                       </div>
                     </div>
@@ -402,7 +401,13 @@ const App: React.FC = () => {
 
           <div className="mt-10">
             {isLoading && <LoadingSpinner />}
-            {error && (<div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-md" role="alert"><p className="font-bold">Ralat</p><p>{error}</p></div>)}
+            {error && (
+              <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-md" role="alert">
+                <p className="font-bold">Ralat</p>
+                <p>{error}</p>
+              </div>
+            )}
+
             {substitutionPlan && (
               <div>
                 <div className="flex flex-col sm:flex-row justify-between sm:items-center mb-6 gap-4">
@@ -416,15 +421,16 @@ const App: React.FC = () => {
                     </button>
                     <button
                       onClick={handleDownloadPdf}
-                      className="bg-emerald-600 text-white font-semibold py-2 px-4 rounded-lg border border-emerald-600 hover:bg-emerald-700 transition flex items-center gap-2"
+                      disabled={!substitutionPlan || !reportInfo}
+                      className="bg-emerald-600 text-white font-semibold py-2 px-4 rounded-lg border border-emerald-600 hover:bg-emerald-700 transition flex items-center gap-2 disabled:opacity-60"
                     >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                       Muat Turun PDF
                     </button>
                   </div>
                 </div>
 
-                <div ref={pdfContentRef} className="p-4 bg-white rounded-xl shadow-lg border border-slate-200">
+                <div className="p-4 bg-white rounded-xl shadow-lg border border-slate-200">
                   {reportInfo && (
                     <div className="p-2 mb-6">
                       <h3 className="text-lg font-bold text-slate-800 mb-4 border-b border-slate-200 pb-3">Jadual Guru Ganti</h3>
@@ -456,7 +462,6 @@ const App: React.FC = () => {
                             <th className="px-4 py-3 font-semibold">Subjek</th>
                             <th className="px-4 py-3 font-semibold">Guru Tidak Hadir</th>
                             <th className="px-4 py-3 font-semibold">Guru Ganti</th>
-                            <th className="px-4 py-3 font-semibold">Justifikasi AI</th>
                           </tr>
                         </thead>
                         <tbody className="text-slate-700">
@@ -503,7 +508,6 @@ const App: React.FC = () => {
                                   </span>
                                 )}
                               </td>
-                              <td className="px-4 py-3 text-slate-500 italic text-xs max-w-[200px]">{sub.justification}</td>
                             </tr>
                           ))}
                         </tbody>
