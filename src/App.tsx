@@ -1,21 +1,13 @@
 import React, { useState, useCallback, useRef } from 'react';
 import { jsPDF } from 'jspdf';
-import html2canvas from 'html2canvas';
+import autoTable from 'jspdf-autotable';
 import { TEACHERS, TIMETABLE } from '@/constants';
 import { Teacher, Substitution, AbsentTeacherInfo } from '@/types';
 import { generateSubstitutionPlan } from '@/services/geminiService';
 import LoadingSpinner from '@/components/LoadingSpinner';
 
 const GraduationCapIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    width="24" height="24" viewBox="0 0 24 24"
-    fill="none" stroke="currentColor" strokeWidth="2"
-    strokeLinecap="round" strokeLinejoin="round" {...props}
-  >
-    <path d="M22 10v6M2 10l10-5 10 5-10 5z"></path>
-    <path d="M6 12v5c0 1.7.7 3.2 1.9 4.2a2 2 0 0 0 2.2 0c1.2-1 1.9-2.5 1.9-4.2v-5"></path>
-  </svg>
+  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M22 10v6M2 10l10-5 10 5-10 5z"></path><path d="M6 12v5c0 1.7.7 3.2 1.9 4.2a2 2 0 0 0 2.2 0c1.2-1 1.9-2.5 1.9-4.2v-5"></path></svg>
 );
 
 const App: React.FC = () => {
@@ -52,9 +44,7 @@ const App: React.FC = () => {
     const upperCaseDay = day.toUpperCase();
 
     const busyTeacherIds = new Set(
-      TIMETABLE
-        .filter(entry => entry.day.toUpperCase() === upperCaseDay && entry.time === time)
-        .map(entry => entry.teacherId)
+      TIMETABLE.filter(entry => entry.day.toUpperCase() === upperCaseDay && entry.time === time).map(entry => entry.teacherId)
     );
 
     const absentTeacherIds = new Set(absentTeachers.map(t => t.id).filter(id => id));
@@ -80,7 +70,7 @@ const App: React.FC = () => {
       newPlan[subIndex] = {
         ...newPlan[subIndex],
         substituteTeacherId: 'LAIN_LAIN',
-        substituteTeacherName: '',
+        substituteTeacherName: '', // Clear name to allow manual input
         justification: 'Ditentukan secara manual.',
       };
     } else {
@@ -215,70 +205,74 @@ const App: React.FC = () => {
     }
   }, [absentTeachers, absenceDate]);
 
-  const handleDownloadPdf = async () => {
-    const content = pdfContentRef.current;
-    if (!content) return;
-
-    const wasEditing = isEditing;
-    if (wasEditing) {
-      setIsEditing(false);
-      await new Promise(resolve => setTimeout(resolve, 50));
+  // === BARU: PDF stabil menggunakan jsPDF + autoTable (bukan html2canvas) ===
+  const handleDownloadPdf = () => {
+    if (!substitutionPlan || !reportInfo) {
+      setError('Tiada data untuk dimuat turun.');
+      return;
     }
 
-    try {
-      const canvas = await html2canvas(content, { scale: 2, useCORS: true });
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'px',
-        format: 'a4',
-        hotfixes: ['px_scaling'],
-      });
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const marginX = 40;
 
-      const addFooter = (doc: jsPDF) => {
-        // Using doc.internal.pages.length to get page count
-        const pageCount = (doc as any).internal.pages.length;
-        for (let i = 1; i <= pageCount; i++) {
-          doc.setPage(i);
-          const pdfWidth = doc.internal.pageSize.getWidth();
-          const pdfHeight = doc.internal.pageSize.getHeight();
-          const footerText = "Dijana menggunakan Sistem Guru Ganti SK Long Sebangang";
-          doc.setFontSize(8);
-          doc.setTextColor(128, 128, 128);
-          const textWidth = doc.getStringUnitWidth(footerText) * (doc.getFontSize() / (doc as any).internal.scaleFactor);
-          const textX = (pdfWidth - textWidth) / 2;
-          const textY = pdfHeight - 15;
-          doc.text(footerText, textX, textY);
-        }
-      };
+    // Tajuk
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.text('Jadual Guru Ganti', pageWidth / 2, 40, { align: 'center' });
 
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      const imgProps = (pdf as any).getImageProperties(imgData);
-      const imgHeight = (imgProps.height * pdfWidth) / imgProps.width;
+    // Info ringkas
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    const tarikh = reportInfo.date.toLocaleDateString('ms-MY', { day: 'numeric', month: 'long', year: 'numeric' });
+    const hari = reportInfo.date.toLocaleDateString('ms-MY', { weekday: 'long' });
+    doc.text(`Disediakan Oleh: ${preparerName || 'Tidak Dinyatakan'}`, marginX, 60);
+    doc.text(`Tarikh: ${tarikh}`, marginX, 74);
+    doc.text(`Hari: ${hari}`, marginX, 88);
 
-      let heightLeft = imgHeight;
-      let position = 0;
+    // Senarai guru tidak hadir
+    let startY = 108;
+    doc.setFont('helvetica', 'bold');
+    doc.text('Senarai Guru Tidak Hadir:', marginX, startY);
+    doc.setFont('helvetica', 'normal');
+    startY += 14;
+    reportInfo.absentTeachers.forEach((t, i) => {
+      doc.text(`${i + 1}. ${t.name} (${t.reason})`, marginX + 8, startY);
+      startY += 14;
+    });
 
-      pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, imgHeight);
-      heightLeft -= pageHeight;
+    // Jadual utama
+    const head = [['Masa', 'Kelas', 'Subjek', 'Guru Tidak Hadir', 'Guru Ganti', 'Justifikasi']];
+    const body = substitutionPlan.map((s) => [
+      s.time,
+      s.class,
+      s.subject,
+      s.absentTeacherName,
+      s.substituteTeacherName || (s.substituteTeacherId === 'LAIN_LAIN' ? 'Lain-lain' : ''),
+      s.justification || ''
+    ]);
 
-      while (heightLeft > 0) {
-        position = -heightLeft;
-        pdf.addPage();
-        pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, imgHeight);
-        heightLeft -= pageHeight;
-      }
+    autoTable(doc, {
+      head,
+      body,
+      startY: Math.min(startY + 10, pageHeight - 200),
+      theme: 'grid',
+      margin: { left: marginX, right: marginX },
+      styles: { fontSize: 9, cellPadding: 4, overflow: 'linebreak' },
+      headStyles: { fillColor: [241, 245, 249], textColor: 30, halign: 'left' },
+      didDrawPage: (data) => {
+        // Footer pada setiap halaman
+        doc.setFontSize(8);
+        doc.setTextColor(128);
+        const footer = 'Dijana menggunakan Sistem Guru Ganti SK Long Sebangang';
+        doc.text(footer, pageWidth / 2, pageHeight - 16, { align: 'center' });
+        // Nombor halaman
+        doc.text(`Halaman ${data.pageNumber}`, pageWidth - marginX, pageHeight - 16, { align: 'right' });
+      },
+    });
 
-      addFooter(pdf);
-
-      pdf.save('pelan-guru-ganti.pdf');
-    } catch (error) {
-      console.error("Gagal menjana PDF:", error);
-      setError("Tidak dapat menjana PDF. Sila cuba lagi.");
-    } finally {
-      if (wasEditing) setIsEditing(true);
-    }
+    doc.save('pelan-guru-ganti.pdf');
   };
 
   const selectedTeacherIds = new Set(
@@ -377,7 +371,7 @@ const App: React.FC = () => {
                           className="w-full h-full flex items-center justify-center text-red-500 hover:text-red-700 disabled:text-slate-300 disabled:cursor-not-allowed transition"
                           aria-label="Padam Guru"
                         >
-                          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
+                          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
                         </button>
                       </div>
                     </div>
@@ -408,13 +402,7 @@ const App: React.FC = () => {
 
           <div className="mt-10">
             {isLoading && <LoadingSpinner />}
-            {error && (
-              <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-md" role="alert">
-                <p className="font-bold">Ralat</p>
-                <p>{error}</p>
-              </div>
-            )}
-
+            {error && (<div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-md" role="alert"><p className="font-bold">Ralat</p><p>{error}</p></div>)}
             {substitutionPlan && (
               <div>
                 <div className="flex flex-col sm:flex-row justify-between sm:items-center mb-6 gap-4">
@@ -441,18 +429,9 @@ const App: React.FC = () => {
                     <div className="p-2 mb-6">
                       <h3 className="text-lg font-bold text-slate-800 mb-4 border-b border-slate-200 pb-3">Jadual Guru Ganti</h3>
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
-                        <div>
-                          <p className="font-semibold text-slate-600">Disediakan Oleh:</p>
-                          <p className="text-black font-medium">{preparerName || 'Tidak Dinyatakan'}</p>
-                        </div>
-                        <div>
-                          <p className="font-semibold text-slate-600">Tarikh:</p>
-                          <p className="text-black font-medium">{reportInfo.date.toLocaleDateString('ms-MY', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
-                        </div>
-                        <div>
-                          <p className="font-semibold text-slate-600">Hari:</p>
-                          <p className="text-black font-medium">{reportInfo.date.toLocaleDateString('ms-MY', { weekday: 'long' })}</p>
-                        </div>
+                        <div><p className="font-semibold text-slate-600">Disediakan Oleh:</p><p className="text-black font-medium">{preparerName || 'Tidak Dinyatakan'}</p></div>
+                        <div><p className="font-semibold text-slate-600">Tarikh:</p><p className="text-black font-medium">{reportInfo.date.toLocaleDateString('ms-MY', { day: 'numeric', month: 'long', year: 'numeric' })}</p></div>
+                        <div><p className="font-semibold text-slate-600">Hari:</p><p className="text-black font-medium">{reportInfo.date.toLocaleDateString('ms-MY', { weekday: 'long' })}</p></div>
                       </div>
                       <div className="mt-4 pt-4 border-t border-slate-200">
                         <p className="font-semibold text-slate-600 text-sm">Senarai Guru Tidak Hadir:</p>
