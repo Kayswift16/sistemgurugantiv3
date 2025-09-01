@@ -65,7 +65,6 @@ export default function App() {
     let position = 0;
     pdf.addImage(imgData, "PNG", 0, position, pdfWidth, pdfHeight);
 
-    // kalau tinggi lebih dari 1 page
     if (pdfHeight > pageHeight) {
       let heightLeft = pdfHeight;
       while (heightLeft > 0) {
