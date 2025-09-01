@@ -456,6 +456,7 @@ const App: React.FC = () => {
                             <th className="px-4 py-3 font-semibold">Subjek</th>
                             <th className="px-4 py-3 font-semibold">Guru Tidak Hadir</th>
                             <th className="px-4 py-3 font-semibold">Guru Ganti</th>
+                            <th className="px-4 py-3 font-semibold">Justifikasi AI</th>
                           </tr>
                         </thead>
                         <tbody className="text-slate-700">
@@ -502,6 +503,7 @@ const App: React.FC = () => {
                                   </span>
                                 )}
                               </td>
+                              <td className="px-4 py-3 text-slate-500 italic text-xs max-w-[200px]">{sub.justification}</td>
                             </tr>
                           ))}
                         </tbody>
