@@ -10,7 +10,7 @@ interface ScheduleModalProps {
 const daysOrder = ["ISNIN", "SELASA", "RABU", "KHAMIS", "JUMAAT"];
 
 const ScheduleModal: React.FC<ScheduleModalProps> = ({ isOpen, onClose }) => {
-  if (!isOpen) return null; // modal hidden
+  if (!isOpen) return null;
 
   // group timetable by day
   const groupedByDay: Record<string, typeof TIMETABLE> = {};
@@ -26,15 +26,12 @@ const ScheduleModal: React.FC<ScheduleModalProps> = ({ isOpen, onClose }) => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-5xl rounded-2xl bg-white p-6 shadow-xl overflow-y-auto max-h-[90vh]">
-        <h2 className="text-xl font-bold text-slate-800 mb-4">
-          📅 Jadual Waktu Semasa
-        </h2>
+      <div className="w-full max-w-6xl rounded-2xl bg-white p-6 shadow-xl overflow-y-auto max-h-[90vh]">
+        <h2 className="text-xl font-bold text-slate-800 mb-4">📅 Jadual Waktu Semasa</h2>
 
         <p className="text-sm text-slate-600 mb-6">
           Ini ialah jadual waktu yang sedang digunakan oleh sistem. <br />
-          Jika jadual tidak terkini, sila kemaskini fail{" "}
-          <code>constants.ts</code>.
+          Jika jadual tidak terkini, sila kemaskini fail <code>constants.ts</code>.
         </p>
 
         {daysOrder.map((day) => (
@@ -59,17 +56,12 @@ const ScheduleModal: React.FC<ScheduleModalProps> = ({ isOpen, onClose }) => {
                         {entry.subjects.map((s) => s.subject).join(", ")}
                       </td>
                       <td className="px-3 py-2">
-                        {entry.subjects
-                          .map((s) => getTeacherName(s.teacherId))
-                          .join(", ")}
+                        {entry.subjects.map((s) => getTeacherName(s.teacherId)).join(", ")}
                       </td>
                     </tr>
                   )) || (
                     <tr>
-                      <td
-                        colSpan={4}
-                        className="px-3 py-2 text-center text-slate-500"
-                      >
+                      <td colSpan={4} className="px-3 py-2 text-center text-slate-500">
                         Tiada data untuk hari ini
                       </td>
                     </tr>
