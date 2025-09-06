@@ -242,6 +242,14 @@ const App: React.FC = () => {
           reason: t.reason,
         }));
         setReportInfo({ date: dateObj, day: dayName, absentTeachers: absentTeachersForReport });
+
+        // persist
+        localStorage.setItem('substitutionPlan', JSON.stringify(plan));
+        localStorage.setItem('reportInfo', JSON.stringify({
+          date: dateObj.toISOString(),
+          day: dayName,
+          absentTeachers: absentTeachersForReport
+        }));
       } catch (err: any) {
         setError(err.message || "Ralat tidak dijangka berlaku.");
       } finally {
@@ -251,43 +259,65 @@ const App: React.FC = () => {
     [absentTeachers, absenceDate]
   );
 
-  // ✅ Better PDF generation (multi-page, mobile-friendly)
+  // Improved PDF generation: paginate + footer + include report metadata
   const handleDownloadPdf = async () => {
     const content = pdfContentRef.current;
     if (!content) return;
 
     try {
+      // ensure any edits finish
+      if (isEditing) setIsEditing(false);
+
       const canvas = await html2canvas(content, {
         scale: 2,
         useCORS: true,
       });
-      const imgData = canvas.toDataURL("image/png");
 
+      const imgData = canvas.toDataURL("image/png");
       const pdf = new jsPDF("p", "pt", "a4");
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = pdf.internal.pageSize.getHeight();
 
-      const imgWidth = pdfWidth;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      // Calculate image height to fit pdf width
+      const ratio = pdfWidth / canvas.width;
+      const imgHeight = canvas.height * ratio;
 
-      let heightLeft = imgHeight;
       let position = 0;
+      pdf.addImage(imgData, "PNG", 0, position, pdfWidth, imgHeight);
 
-      // First page
-      pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
-      heightLeft -= pdfHeight;
+      let remaining = imgHeight - pdfHeight;
 
-      // Extra pages if needed
-      while (heightLeft > 0) {
-        position = heightLeft - imgHeight;
+      // add pages while there's remaining content
+      while (remaining > -0.5) { // small tolerance
+        position -= pdfHeight;
         pdf.addPage();
-        pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
-        heightLeft -= pdfHeight;
+        pdf.addImage(imgData, "PNG", 0, position, pdfWidth, imgHeight);
+        remaining -= pdfHeight;
       }
 
-      pdf.save("pelan-guru-ganti.pdf");
+      // add footer to every page
+      const footerText = "Dijana menggunakan Sistem Guru Ganti SK Long Sebangang";
+      const pageCount = pdf.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        pdf.setPage(i);
+        pdf.setFontSize(8);
+        pdf.setTextColor(120, 120, 120);
+        const pw = pdf.internal.pageSize.getWidth();
+        const textWidth = pdf.getStringUnitWidth(footerText) * (pdf.getFontSize() / (pdf as any).internal.scaleFactor);
+        const x = (pw - textWidth) / 2;
+        pdf.text(footerText, x, pdf.internal.pageSize.getHeight() - 20);
+      }
+
+      // try save, fallback to open in new tab if browser blocks download
+      try {
+        pdf.save("pelan-guru-ganti.pdf");
+      } catch {
+        const blobUrl = pdf.output('bloburl');
+        window.open(blobUrl, "_blank");
+      }
     } catch (e) {
       console.error("PDF error:", e);
+      setError("Tidak dapat menjana PDF. Sila cuba lagi.");
     }
   };
 
@@ -405,46 +435,93 @@ const App: React.FC = () => {
             {error && <div className="text-red-600">{error}</div>}
             {substitutionPlan && (
               <div ref={pdfContentRef} className="bg-white p-4 rounded shadow">
-                <h2 className="text-xl font-bold mb-4">Pelan Guru Ganti</h2>
-                <table className="w-full border">
-                  <thead>
-                    <tr className="bg-slate-100">
-                      <th className="px-3 py-2 border">Masa</th>
-                      <th className="px-3 py-2 border">Kelas</th>
-                      <th className="px-3 py-2 border">Subjek</th>
-                      <th className="px-3 py-2 border">Guru Tidak Hadir</th>
-                      <th className="px-3 py-2 border">Guru Ganti</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {substitutionPlan.map((sub, i) => (
-                      <tr key={i}>
-                        <td className="px-3 py-2 border">{sub.time}</td>
-                        <td className="px-3 py-2 border">{sub.class}</td>
-                        <td className="px-3 py-2 border">{sub.subject}</td>
-                        <td className="px-3 py-2 border">
-                          {sub.absentTeachers?.length
-                            ? sub.absentTeachers.map((t) => t.name).join(", ")
-                            : "Tiada"}
-                        </td>
-                        <td className="px-3 py-2 border text-emerald-700 font-semibold">
-                          {sub.substituteTeacherName || "(Belum ditentukan)"}
-                        </td>
+                {/* --- Report header included in canvas (so it appears in PDF) --- */}
+                {reportInfo && (
+                  <div className="mb-4 p-3 border-b">
+                    <h3 className="text-lg font-bold mb-2">Jadual Guru Ganti</h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+                      <div>
+                        <p className="font-semibold text-slate-600">Disediakan Oleh:</p>
+                        <p className="text-black font-medium">{preparerName || "Tidak Dinyatakan"}</p>
+                      </div>
+                      <div>
+                        <p className="font-semibold text-slate-600">Tarikh:</p>
+                        <p className="text-black font-medium">{reportInfo.date.toLocaleDateString('ms-MY', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+                      </div>
+                      <div>
+                        <p className="font-semibold text-slate-600">Hari:</p>
+                        <p className="text-black font-medium">{reportInfo.day}</p>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 pt-3 border-t">
+                      <p className="font-semibold text-slate-600 text-sm">Senarai Guru Tidak Hadir:</p>
+                      <ul className="mt-1 text-sm">
+                        {reportInfo.absentTeachers.map((t, idx) => (
+                          <li key={idx} className="text-black font-medium">
+                            {idx + 1}. {t.name} <span className="text-slate-500 font-normal">({t.reason})</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                )}
+
+                {/* substitution table */}
+                <div className="overflow-x-auto">
+                  <table className="w-full border">
+                    <thead>
+                      <tr className="bg-slate-100">
+                        <th className="px-3 py-2 border">Masa</th>
+                        <th className="px-3 py-2 border">Kelas</th>
+                        <th className="px-3 py-2 border">Subjek</th>
+                        <th className="px-3 py-2 border">Guru Tidak Hadir</th>
+                        <th className="px-3 py-2 border">Guru Ganti</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <button
-                  onClick={handleDownloadPdf}
-                  className="mt-4 bg-emerald-600 text-white px-3 py-2 rounded"
-                >
-                  Muat Turun PDF
-                </button>
+                    </thead>
+                    <tbody>
+                      {substitutionPlan.map((sub, i) => (
+                        <tr key={i}>
+                          <td className="px-3 py-2 border">{sub.time}</td>
+                          <td className="px-3 py-2 border">{sub.class}</td>
+                          <td className="px-3 py-2 border">{sub.subject}</td>
+                          <td className="px-3 py-2 border">
+                            {sub.absentTeachers?.length
+                              ? sub.absentTeachers.map((t) => t.name).join(", ")
+                              : "Tiada"}
+                          </td>
+                          <td className="px-3 py-2 border text-emerald-700 font-semibold">
+                            {sub.substituteTeacherName || "(Belum ditentukan)"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="mt-4 flex justify-between items-center">
+                  <div className="text-sm text-slate-500">Disediakan oleh: {preparerName || "(tidak dinyatakan)"}</div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setIsEditing(!isEditing)}
+                      className="px-4 py-2 bg-yellow-500 text-white rounded-lg shadow hover:bg-yellow-600 transition"
+                    >
+                      {isEditing ? "Selesai Edit" : "Edit"}
+                    </button>
+                    <button
+                      onClick={handleDownloadPdf}
+                      className="px-4 py-2 bg-emerald-600 text-white rounded-lg shadow hover:bg-emerald-700 transition"
+                    >
+                      Muat Turun PDF
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
           </div>
         </main>
       </div>
+
       <ScheduleModal isOpen={isScheduleOpen} onClose={() => setIsScheduleOpen(false)} />
     </div>
   );
