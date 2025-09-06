@@ -1,3 +1,4 @@
+// src/components/ScheduleModal.tsx
 import React from "react";
 import { TIMETABLE, TEACHERS } from "@/constants";
 
@@ -26,11 +27,14 @@ const ScheduleModal: React.FC<ScheduleModalProps> = ({ isOpen, onClose }) => {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-5xl rounded-2xl bg-white p-6 shadow-xl overflow-y-auto max-h-[90vh]">
-        <h2 className="text-xl font-bold text-slate-800 mb-4">📅 Jadual Waktu Semasa</h2>
+        <h2 className="text-xl font-bold text-slate-800 mb-4">
+          📅 Jadual Waktu Semasa
+        </h2>
 
         <p className="text-sm text-slate-600 mb-6">
           Ini ialah jadual waktu yang sedang digunakan oleh sistem. <br />
-          Jika jadual tidak terkini, sila kemaskini fail <code>constants.ts</code>.
+          Jika jadual tidak terkini, sila kemaskini fail{" "}
+          <code>constants.ts</code>.
         </p>
 
         {daysOrder.map((day) => (
@@ -47,18 +51,20 @@ const ScheduleModal: React.FC<ScheduleModalProps> = ({ isOpen, onClose }) => {
                   </tr>
                 </thead>
                 <tbody>
-                  {groupedByDay[day]?.length ? (
-                    groupedByDay[day].map((entry, i) =>
-                      entry.subjects.map((subj, j) => (
-                        <tr key={`${i}-${j}`} className="border-b border-slate-200">
-                          <td className="px-3 py-2 font-mono">{entry.time}</td>
-                          <td className="px-3 py-2">{entry.class}</td>
-                          <td className="px-3 py-2">{subj.subject}</td>
-                          <td className="px-3 py-2">{getTeacherName(subj.teacherId)}</td>
-                        </tr>
-                      ))
-                    )
-                  ) : (
+                  {groupedByDay[day]?.map((entry, i) => (
+                    <tr key={i} className="border-b border-slate-200">
+                      <td className="px-3 py-2 font-mono">{entry.time}</td>
+                      <td className="px-3 py-2">{entry.class}</td>
+                      <td className="px-3 py-2">
+                        {entry.subjects.map((s) => s.subject).join(", ")}
+                      </td>
+                      <td className="px-3 py-2">
+                        {entry.subjects
+                          .map((s) => getTeacherName(s.teacherId))
+                          .join(", ")}
+                      </td>
+                    </tr>
+                  )) || (
                     <tr>
                       <td
                         colSpan={4}
