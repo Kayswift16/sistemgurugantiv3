@@ -3,27 +3,27 @@ export interface Teacher {
   name: string;
 }
 
-export interface AbsentTeacherInfo {
-  key: string; // For React list keys
-  id: string;
-  reason: string;
-}
-
 export interface ScheduleEntry {
   day: string;
   time: string;
   class: string;
-  subject: string;
-  teacherId: string;
+  subjects: { subject: string; teacherId: string }[]; // can be 1 or more
+  isJoint?: boolean; // true if multiple teachers teach together
 }
 
 export interface Substitution {
   day: string;
   time: string;
   class: string;
+  absentTeachers: { name: string; id: string }[]; // can be multiple if joint
   subject: string;
-  absentTeacherName: string;
   substituteTeacherId: string;
   substituteTeacherName: string;
   justification: string;
+}
+
+export interface AbsentTeacherInfo {
+  key: string;
+  id: string;
+  reason: string;
 }
