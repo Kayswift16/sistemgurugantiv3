@@ -47,14 +47,18 @@ const ScheduleModal: React.FC<ScheduleModalProps> = ({ isOpen, onClose }) => {
                   </tr>
                 </thead>
                 <tbody>
-                  {groupedByDay[day]?.map((entry, i) => (
-                    <tr key={i} className="border-b border-slate-200">
-                      <td className="px-3 py-2 font-mono">{entry.time}</td>
-                      <td className="px-3 py-2">{entry.class}</td>
-                      <td className="px-3 py-2">{entry.subject}</td>
-                      <td className="px-3 py-2">{getTeacherName(entry.teacherId)}</td>
-                    </tr>
-                  )) || (
+                  {groupedByDay[day]?.length ? (
+                    groupedByDay[day].map((entry, i) =>
+                      entry.subjects.map((subj, j) => (
+                        <tr key={`${i}-${j}`} className="border-b border-slate-200">
+                          <td className="px-3 py-2 font-mono">{entry.time}</td>
+                          <td className="px-3 py-2">{entry.class}</td>
+                          <td className="px-3 py-2">{subj.subject}</td>
+                          <td className="px-3 py-2">{getTeacherName(subj.teacherId)}</td>
+                        </tr>
+                      ))
+                    )
+                  ) : (
                     <tr>
                       <td
                         colSpan={4}
