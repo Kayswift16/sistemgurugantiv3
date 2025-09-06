@@ -111,8 +111,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     const jsonText = response.text.trim();
-    const result = JSON.parse(jsonText) as Substitution[];
-    
+    const rawResult = JSON.parse(jsonText) as any[];
+
+    // ✅ Normalize absentTeachers to {id, name}[]
+    const result: Substitution[] = rawResult.map(item => ({
+      ...item,
+      absentTeachers: item.absentTeachers.map((name: string) => {
+        const teacher = allTeachers.find(t => t.name === name);
+        return { id: teacher?.id || "", name };
+      }),
+    }));
+
     return res.status(200).json(result);
 
   } catch (error) {
