@@ -11,7 +11,7 @@ const daysOrder = ["ISNIN", "SELASA", "RABU", "KHAMIS", "JUMAAT"];
 const ScheduleModal: React.FC<ScheduleModalProps> = ({ isOpen, onClose }) => {
   if (!isOpen) return null;
 
-  // Group timetable by day
+  // group timetable by day
   const groupedByDay: Record<string, typeof TIMETABLE> = {};
   TIMETABLE.forEach((entry) => {
     if (!groupedByDay[entry.day]) groupedByDay[entry.day] = [];
@@ -52,10 +52,10 @@ const ScheduleModal: React.FC<ScheduleModalProps> = ({ isOpen, onClose }) => {
                       <td className="px-3 py-2 font-mono">{entry.time}</td>
                       <td className="px-3 py-2">{entry.class}</td>
                       <td className="px-3 py-2">
-                        {entry.subjects.map((s) => s.subject).join(" + ")}
+                        {entry.subjects.map((s) => s.subject).join(", ")}
                       </td>
                       <td className="px-3 py-2">
-                        {entry.subjects.map((s) => getTeacherName(s.teacherId)).join(" + ")}
+                        {entry.subjects.map((s) => getTeacherName(s.teacherId)).join(", ")}
                       </td>
                     </tr>
                   )) || (
