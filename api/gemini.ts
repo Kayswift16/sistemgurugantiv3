@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenAI, Type } from "@google/genai";
-import type { Teacher, ScheduleEntry, Substitution, AbsentTeacherInfo } from '../src/types';
+import type { Teacher, ScheduleEntry, Substitution } from '../src/types';
 
 if (!process.env.API_KEY) {
   throw new Error("API_KEY environment variable is not set");
@@ -23,12 +23,15 @@ const generatePrompt = (
   
   const absentTeacherIds = absentTeachersInfo.map(info => info.teacher.id);
 
-  const absentTeachersSchedules = timetable.filter(entry => 
-    entry.day.toUpperCase() === upperCaseAbsenceDay && absentTeacherIds.includes(entry.teacherId)
+  // ✅ Works with subjects[] instead of single teacherId
+  const absentTeachersSchedules = timetable.filter(entry =>
+    entry.day.toUpperCase() === upperCaseAbsenceDay &&
+    entry.subjects.some(s => absentTeacherIds.includes(s.teacherId))
   );
 
   return `
-    Anda adalah Penolong Kanan Pentadbiran yang bijak di sebuah sekolah. Tugas anda adalah untuk mencari guru ganti terbaik untuk SEMUA guru yang tidak hadir pada hari tertentu.
+    Anda adalah Penolong Kanan Pentadbiran yang bijak di sebuah sekolah. 
+    Tugas anda adalah untuk mencari guru ganti terbaik untuk SEMUA guru yang tidak hadir pada hari tertentu.
 
     MAKLUMAT KES:
     - Hari Tidak Hadir: ${absenceDay}
@@ -42,20 +45,25 @@ ${absentTeacherDetails}
     1. Untuk SETIAP guru yang tidak hadir, kenal pasti semua slot waktu mengajar mereka.
     2. PENTING: Guru yang berada dalam "Senarai Guru Tidak Hadir" TIDAK BOLEH dicadangkan sebagai guru ganti.
     3. Untuk setiap slot yang kosong, cari semua guru yang berkelapangan (tidak mempunyai kelas dan tidak termasuk dalam senarai guru tidak hadir).
-    4. Daripada senarai guru yang berkelapangan itu, cadangkan SATU guru ganti yang paling sesuai untuk setiap slot. Elakkan seorang guru ganti ditugaskan pada dua kelas yang berbeza pada masa yang sama.
-    5. Gunakan kriteria berikut untuk membuat cadangan:
+    4. Daripada senarai guru yang berkelapangan itu, cadangkan SATU guru ganti yang paling sesuai untuk setiap slot. 
+       Elakkan seorang guru ganti ditugaskan pada dua kelas yang berbeza pada masa yang sama.
+    5. Jika satu slot mempunyai lebih daripada seorang guru (contoh: "PM/AY PI/IM"), ia dikira sebagai satu unit pengajaran sahaja:
+       - Jika seorang sahaja yang tidak hadir → tetap perlu seorang guru ganti.
+       - Jika kedua-duanya tidak hadir → hanya seorang guru ganti diperlukan, bukan dua.
+       - Dalam laporan, senaraikan semua guru asal yang tidak hadir, tetapi cadangkan hanya seorang guru ganti.
+    6. Gunakan kriteria berikut untuk membuat cadangan:
         a. Keutamaan Tertinggi: Guru yang mengajar subjek yang sama.
         b. Keutamaan Kedua: Guru yang mengajar di tahun (kelas) yang sama.
         c. Keutamaan Ketiga: Guru yang mempunyai beban waktu mengajar paling sedikit pada hari tersebut untuk mengimbangi beban kerja.
-    6. Sediakan justifikasi ringkas untuk setiap cadangan. Anda mesti memasukkan nama guru yang digantikan dalam justifikasi.
-    7. Kembalikan jawapan anda dalam format JSON sahaja, mengikut skema yang ditetapkan. Jangan sertakan sebarang teks atau penjelasan di luar struktur JSON.
-    
+    7. Sediakan justifikasi ringkas untuk setiap cadangan. Anda mesti memasukkan nama guru yang digantikan dalam justifikasi.
+    8. Kembalikan jawapan anda dalam format JSON SAHAJA, ikut skema yang ditetapkan.
+
     Berikut adalah jadual gabungan untuk SEMUA guru yang tidak hadir pada hari ${absenceDay}:
     ${JSON.stringify(absentTeachersSchedules)}
   `;
 };
 
-
+// ✅ Schema supports multiple absent teachers per slot
 const responseSchema = {
   type: Type.ARRAY,
   items: {
@@ -65,48 +73,51 @@ const responseSchema = {
       time: { type: Type.STRING },
       class: { type: Type.STRING },
       subject: { type: Type.STRING },
-      absentTeacherName: { type: Type.STRING },
+      absentTeachers: {
+        type: Type.ARRAY,
+        items: { type: Type.STRING }
+      },
       substituteTeacherId: { type: Type.STRING },
       substituteTeacherName: { type: Type.STRING },
       justification: { type: Type.STRING },
     },
-    required: ["day", "time", "class", "subject", "absentTeacherName", "substituteTeacherId", "substituteTeacherName", "justification"]
+    required: ["day", "time", "class", "subject", "absentTeachers", "substituteTeacherId", "substituteTeacherName", "justification"]
   },
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-    if (req.method !== 'POST') {
-        res.setHeader('Allow', ['POST']);
-        return res.status(405).end('Method Not Allowed');
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', ['POST']);
+    return res.status(405).end('Method Not Allowed');
+  }
+  
+  try {
+    const { absentTeachersInfo, allTeachers, timetable, absenceDay } = req.body;
+
+    if (!absentTeachersInfo || !allTeachers || !timetable || !absenceDay) {
+      return res.status(400).json({ error: "Missing required fields in the request body." });
     }
     
-    try {
-        const { absentTeachersInfo, allTeachers, timetable, absenceDay } = req.body;
+    const prompt = generatePrompt(absentTeachersInfo, allTeachers, timetable, absenceDay);
+    
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: responseSchema,
+        temperature: 0.2,
+      },
+    });
 
-        if (!absentTeachersInfo || !allTeachers || !timetable || !absenceDay) {
-            return res.status(400).json({ error: "Missing required fields in the request body." });
-        }
-        
-        const prompt = generatePrompt(absentTeachersInfo, allTeachers, timetable, absenceDay);
-        
-        const response = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
-          contents: prompt,
-          config: {
-            responseMimeType: "application/json",
-            responseSchema: responseSchema,
-            temperature: 0.2,
-          },
-        });
-  
-        const jsonText = response.text.trim();
-        const result = JSON.parse(jsonText) as Substitution[];
-        
-        return res.status(200).json(result);
+    const jsonText = response.text.trim();
+    const result = JSON.parse(jsonText) as Substitution[];
+    
+    return res.status(200).json(result);
 
-    } catch (error) {
-        console.error("Error in Vercel function:", error);
-        const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
-        return res.status(500).json({ error: `Gagal menjana pelan guru ganti: ${errorMessage}` });
-    }
+  } catch (error) {
+    console.error("Error in Vercel function:", error);
+    const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
+    return res.status(500).json({ error: `Gagal menjana pelan guru ganti: ${errorMessage}` });
+  }
 }
