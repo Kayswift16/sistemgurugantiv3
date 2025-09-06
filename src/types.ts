@@ -1,46 +1,38 @@
-// src/types.ts
-
-// ✅ A teacher in the system
+// A teacher with unique ID + full name
 export interface Teacher {
   id: string;
   name: string;
 }
 
-// ✅ A subject taught by a specific teacher in a timetable slot
+// A subject taught by a specific teacher in a slot
 export interface SubjectTeacher {
   subject: string;
   teacherId: string;
 }
 
-// ✅ A timetable entry (can have one or more teachers)
+// A single timetable entry (1 class, 1 slot, can have multiple teachers)
 export interface ScheduleEntry {
-  day: string;
-  time: string;
-  class: string;
-  subjects: SubjectTeacher[]; // multiple teachers supported
-  isJoint?: boolean;          // true if more than one teacher is assigned
+  day: string;                   // ISNIN, SELASA, ...
+  time: string;                  // e.g. "0720-0750"
+  class: string;                 // e.g. "TAHUN 4"
+  subjects: SubjectTeacher[];    // supports multiple teachers in one slot
+  isJoint?: boolean;             // true if >1 teacher in that slot
 }
 
-// ✅ For input form when user marks a teacher as absent
+// User input when marking absences
 export interface AbsentTeacherInfo {
-  key: string;   // unique key for React lists
-  id: string;    // teacherId
+  key: string;   // for React lists
+  id: string;    // teacher.id
   reason: string;
 }
 
-// ✅ A teacher who is absent (used inside Substitution)
-export interface AbsentTeacher {
-  id: string;
-  name: string;
-}
-
-// ✅ A substitution plan entry
+// AI-generated substitution (one row in the final plan)
 export interface Substitution {
   day: string;
   time: string;
   class: string;
   subject: string;
-  absentTeachers: AbsentTeacher[];   // ✅ now supports multiple absent teachers
+  absentTeachers: { id: string; name: string }[]; // ✅ multiple absent teachers
   substituteTeacherId: string;
   substituteTeacherName: string;
   justification: string;
