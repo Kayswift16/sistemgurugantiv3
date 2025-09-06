@@ -16,14 +16,14 @@ const generatePrompt = (
 ): string => {
   const upperCaseAbsenceDay = absenceDay.toUpperCase();
   const relevantTimetableForDay = timetable.filter(entry => entry.day.toUpperCase() === upperCaseAbsenceDay);
-
-  const absentTeacherDetails = absentTeachersInfo.map(info =>
+  
+  const absentTeacherDetails = absentTeachersInfo.map(info => 
     `- ${info.teacher.name} (ID: ${info.teacher.id}), Sebab: ${info.reason || 'Tidak dinyatakan'}`
   ).join('\n');
-
+  
   const absentTeacherIds = absentTeachersInfo.map(info => info.teacher.id);
 
-  // ✅ handle multiple teachers per slot
+  // ✅ Works with subjects[] instead of single teacherId
   const absentTeachersSchedules = timetable.filter(entry =>
     entry.day.toUpperCase() === upperCaseAbsenceDay &&
     entry.subjects.some(s => absentTeacherIds.includes(s.teacherId))
@@ -63,7 +63,7 @@ ${absentTeacherDetails}
   `;
 };
 
-// ✅ Schema updated: absentTeachers is an array of names
+// ✅ Schema now expects absentTeachers[] instead of absentTeacherName
 const responseSchema = {
   type: Type.ARRAY,
   items: {
@@ -90,16 +90,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.setHeader('Allow', ['POST']);
     return res.status(405).end('Method Not Allowed');
   }
-
+  
   try {
     const { absentTeachersInfo, allTeachers, timetable, absenceDay } = req.body;
 
     if (!absentTeachersInfo || !allTeachers || !timetable || !absenceDay) {
       return res.status(400).json({ error: "Missing required fields in the request body." });
     }
-
+    
     const prompt = generatePrompt(absentTeachersInfo, allTeachers, timetable, absenceDay);
-
+    
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: prompt,
