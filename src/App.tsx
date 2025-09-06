@@ -251,18 +251,40 @@ const App: React.FC = () => {
     [absentTeachers, absenceDate]
   );
 
-  // PDF generation (unchanged)
+  // ✅ Better PDF generation (multi-page, mobile-friendly)
   const handleDownloadPdf = async () => {
     const content = pdfContentRef.current;
     if (!content) return;
+
     try {
-      const canvas = await html2canvas(content, { scale: 2 });
+      const canvas = await html2canvas(content, {
+        scale: 2,
+        useCORS: true,
+      });
       const imgData = canvas.toDataURL("image/png");
+
       const pdf = new jsPDF("p", "pt", "a4");
       const pdfWidth = pdf.internal.pageSize.getWidth();
-      const imgProps = (pdf as any).getImageProperties(imgData);
-      const imgHeight = (imgProps.height * pdfWidth) / imgProps.width;
-      pdf.addImage(imgData, "PNG", 0, 0, pdfWidth, imgHeight);
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+
+      const imgWidth = pdfWidth;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+      let heightLeft = imgHeight;
+      let position = 0;
+
+      // First page
+      pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+      heightLeft -= pdfHeight;
+
+      // Extra pages if needed
+      while (heightLeft > 0) {
+        position = heightLeft - imgHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+        heightLeft -= pdfHeight;
+      }
+
       pdf.save("pelan-guru-ganti.pdf");
     } catch (e) {
       console.error("PDF error:", e);
