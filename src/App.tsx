@@ -2,7 +2,7 @@ import React, { useState, useCallback, useRef } from 'react';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import { TEACHERS, TIMETABLE } from '@/constants';
-import { Teacher, Substitution, AbsentTeacherInfo, ScheduleEntry } from '@/types';
+import { Teacher, Substitution, AbsentTeacherInfo } from '@/types';
 import { generateSubstitutionPlan } from '@/services/geminiService';
 import LoadingSpinner from '@/components/LoadingSpinner';
 
@@ -135,6 +135,7 @@ const App: React.FC = () => {
       return;
     }
 
+    // Map selected absent teachers into Teacher objects
     const absentTeachersWithData = absentTeachers
       .map(({ id, reason }) => ({
         teacher: TEACHERS.find(t => t.id === id)!,
@@ -148,8 +149,42 @@ const App: React.FC = () => {
       return;
     }
 
+    // ✅ Merge joint absent teachers (so one slot = one substitution)
+    const mergedAbsentTeachers: { teacher: Teacher; reason: string }[] = [];
+    const seen = new Set<string>();
+
+    for (const absent of absentTeachersWithData) {
+      if (seen.has(absent.teacher.id)) continue;
+      seen.add(absent.teacher.id);
+
+      const jointEntries = TIMETABLE.filter(
+        entry =>
+          entry.day.toUpperCase() === dayName.toUpperCase() &&
+          entry.subjects.some(s => s.teacherId === absent.teacher.id)
+      );
+
+      let jointAbsent: { teacher: Teacher; reason: string }[] = [absent];
+
+      for (const entry of jointEntries) {
+        for (const subj of entry.subjects) {
+          if (
+            subj.teacherId !== absent.teacher.id &&
+            absentTeachersWithData.some(a => a.teacher.id === subj.teacherId)
+          ) {
+            const other = absentTeachersWithData.find(a => a.teacher.id === subj.teacherId)!;
+            if (!seen.has(other.teacher.id)) {
+              seen.add(other.teacher.id);
+              jointAbsent.push(other);
+            }
+          }
+        }
+      }
+
+      mergedAbsentTeachers.push(...jointAbsent);
+    }
+
     try {
-      const plan = await generateSubstitutionPlan(absentTeachersWithData, TEACHERS, TIMETABLE, dayName);
+      const plan = await generateSubstitutionPlan(mergedAbsentTeachers, TEACHERS, TIMETABLE, dayName);
 
       // Resolve substitution conflicts
       const resolvedPlan: Substitution[] = [];
@@ -167,10 +202,9 @@ const App: React.FC = () => {
         const assignedSubstitutesForSlot = assignmentsByTime[time];
 
         if (assignedSubstitutesForSlot.has(sub.substituteTeacherId)) {
-          // Conflict: Find a new substitute
           const busyNow = new Set([
             ...TIMETABLE.filter(e => e.day.toUpperCase() === day.toUpperCase() && e.time === time).flatMap(e => e.subjects.map(s => s.teacherId)),
-            ...absentTeachersWithData.map(t => t.teacher.id),
+            ...mergedAbsentTeachers.map(t => t.teacher.id),
             ...assignedSubstitutesForSlot
           ]);
 
@@ -200,7 +234,7 @@ const App: React.FC = () => {
         }
       }
 
-      const absentTeachersForReport = absentTeachersWithData.map(t => ({
+      const absentTeachersForReport = mergedAbsentTeachers.map(t => ({
         name: t.teacher.name,
         reason: t.reason,
       }));
@@ -234,6 +268,22 @@ const App: React.FC = () => {
         hotfixes: ['px_scaling'],
       });
 
+      const addFooter = (doc: jsPDF) => {
+        const pageCount = (doc as any).internal.pages.length;
+        for (let i = 1; i <= pageCount; i++) {
+          doc.setPage(i);
+          const pdfWidth = doc.internal.pageSize.getWidth();
+          const pdfHeight = doc.internal.pageSize.getHeight();
+          const footerText = "Dijana menggunakan Sistem Guru Ganti SK Long Sebangang";
+          doc.setFontSize(8);
+          doc.setTextColor(128, 128, 128);
+          const textWidth = doc.getStringUnitWidth(footerText) * (doc.getFontSize() / (doc as any).internal.scaleFactor);
+          const textX = (pdfWidth - textWidth) / 2;
+          const textY = pdfHeight - 15;
+          doc.text(footerText, textX, textY);
+        }
+      };
+
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
       const imgProps = (pdf as any).getImageProperties(imgData);
@@ -251,6 +301,8 @@ const App: React.FC = () => {
         pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, imgHeight);
         heightLeft -= pageHeight;
       }
+
+      addFooter(pdf);
 
       pdf.save('pelan-guru-ganti.pdf');
     } catch (error) {
