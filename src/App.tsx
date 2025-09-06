@@ -2,7 +2,7 @@ import React, { useState, useCallback, useRef } from 'react';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import { TEACHERS, TIMETABLE } from '@/constants';
-import { Teacher, Substitution, AbsentTeacherInfo } from '@/types';
+import { Teacher, Substitution, AbsentTeacherInfo, ScheduleEntry } from '@/types';
 import { generateSubstitutionPlan } from '@/services/geminiService';
 import LoadingSpinner from '@/components/LoadingSpinner';
 
@@ -54,7 +54,7 @@ const App: React.FC = () => {
     const busyTeacherIds = new Set(
       TIMETABLE
         .filter(entry => entry.day.toUpperCase() === upperCaseDay && entry.time === time)
-        .map(entry => entry.teacherId)
+        .flatMap(entry => entry.subjects.map(s => s.teacherId))
     );
 
     const absentTeacherIds = new Set(absentTeachers.map(t => t.id).filter(id => id));
@@ -169,7 +169,7 @@ const App: React.FC = () => {
         if (assignedSubstitutesForSlot.has(sub.substituteTeacherId)) {
           // Conflict: Find a new substitute
           const busyNow = new Set([
-            ...TIMETABLE.filter(e => e.day.toUpperCase() === day.toUpperCase() && e.time === time).map(e => e.teacherId),
+            ...TIMETABLE.filter(e => e.day.toUpperCase() === day.toUpperCase() && e.time === time).flatMap(e => e.subjects.map(s => s.teacherId)),
             ...absentTeachersWithData.map(t => t.teacher.id),
             ...assignedSubstitutesForSlot
           ]);
@@ -193,7 +193,6 @@ const App: React.FC = () => {
             });
           }
         } else {
-          // No conflict
           resolvedPlan.push(sub);
           if (sub.substituteTeacherId !== 'LAIN_LAIN') {
             assignmentsByTime[time].add(sub.substituteTeacherId);
@@ -235,23 +234,6 @@ const App: React.FC = () => {
         hotfixes: ['px_scaling'],
       });
 
-      const addFooter = (doc: jsPDF) => {
-        // Using doc.internal.pages.length to get page count
-        const pageCount = (doc as any).internal.pages.length;
-        for (let i = 1; i <= pageCount; i++) {
-          doc.setPage(i);
-          const pdfWidth = doc.internal.pageSize.getWidth();
-          const pdfHeight = doc.internal.pageSize.getHeight();
-          const footerText = "Dijana menggunakan Sistem Guru Ganti SK Long Sebangang";
-          doc.setFontSize(8);
-          doc.setTextColor(128, 128, 128);
-          const textWidth = doc.getStringUnitWidth(footerText) * (doc.getFontSize() / (doc as any).internal.scaleFactor);
-          const textX = (pdfWidth - textWidth) / 2;
-          const textY = pdfHeight - 15;
-          doc.text(footerText, textX, textY);
-        }
-      };
-
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
       const imgProps = (pdf as any).getImageProperties(imgData);
@@ -269,8 +251,6 @@ const App: React.FC = () => {
         pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, imgHeight);
         heightLeft -= pageHeight;
       }
-
-      addFooter(pdf);
 
       pdf.save('pelan-guru-ganti.pdf');
     } catch (error) {
@@ -430,7 +410,6 @@ const App: React.FC = () => {
                       onClick={handleDownloadPdf}
                       className="bg-emerald-600 text-white font-semibold py-2 px-4 rounded-lg border border-emerald-600 hover:bg-emerald-700 transition flex items-center gap-2"
                     >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
                       Muat Turun PDF
                     </button>
                   </div>
@@ -485,7 +464,9 @@ const App: React.FC = () => {
                               <td className="px-4 py-3 font-mono">{sub.time}</td>
                               <td className="px-4 py-3 font-medium">{sub.class}</td>
                               <td className="px-4 py-3">{sub.subject}</td>
-                              <td className="px-4 py-3 text-slate-500">{sub.absentTeacherName}</td>
+                              <td className="px-4 py-3 text-slate-500">
+                                {sub.absentTeachers.map(t => t.name).join(" + ")}
+                              </td>
                               <td className="px-4 py-3">
                                 {isEditing ? (
                                   <div>
