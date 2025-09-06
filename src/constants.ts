@@ -52,12 +52,12 @@ const rawData: Record<string, Record<string, string[]>> = {
     "TAHUN 6": ["BI/BB","SEJ/AY","SEJ/AY","MT/IM","MT/IM","R","BM/NZ","BM/NZ","MZ/IM","SN/MA","SN/MA",""],
   },
   SELASA: {
-    "TAHUN 1": ["PH","BM/NS","BM/NS","BI/FS","BI/FS","MT/SD","E","MT/SD","MT/SD","PS/NS","PS/NS",""],
-    "TAHUN 2": ["PH","BM/JL","BM/JL","PM/MN","PM/MN","MT/KV","E","MT/KV","MT/KV","BI/FS","BI/FS",""],
-    "TAHUN 3": ["PH","BI/BB","BI/BB","PK/NZ","BM/JL","BM/JL","E","BM/JL","BM/JL","PS/SD","PS/SD",""],
-    "TAHUN 4": ["PH","MT/IM","MT/IM","RBT/AY","RBT/AY","BM/NS","E","BM/NS","BM/NS","SN/AY","BI/MN","BI/MN",""],
+    "TAHUN 1": ["PH","BM/NS","BM/NS","BI/FS","BI/FS","E","MT/SD","MT/SD","PS/NS","PS/NS",""],
+    "TAHUN 2": ["PH","BM/JL","BM/JL","PM/MN","PM/MN","E","MT/KV","MT/KV","BI/FS","BI/FS",""],
+    "TAHUN 3": ["PH","BI/BB","BI/BB","PK/NZ","BM/JL","E","BM/JL","BM/JL","PS/SD","PS/SD",""],
+    "TAHUN 4": ["PH","MT/IM","MT/IM","RBT/AY","RBT/AY","E","BM/NS","BM/NS","SN/AY","BI/MN","BI/MN",""],
     "TAHUN 5": ["PH","BI/FS","BI/FS","MT/SD","MT/SD","E","SEJ/AY","SEJ/AY","BM/NZ","PM/BB","PM/BB",""],
-    "TAHUN 6": ["PH","BM/NZ","BM/NZ","MT/IM","MT/IM","PK/MA","E","PK/MA","BI/BB","BI/BB","SN/MA","SN/MA",""],
+    "TAHUN 6": ["PH","BM/NZ","BM/NZ","MT/IM","MT/IM","E","PK/MA","BI/BB","BI/BB","SN/MA","SN/MA",""],
   },
   RABU: {
     "TAHUN 1": ["BI/FS","BI/FS","PM/AY PI/IM","BM/NS","BM/NS","H","BM/NS","MZ/KV","PM/AY PI/IM","PM/AY PI/IM",""],
