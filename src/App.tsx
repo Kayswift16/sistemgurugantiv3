@@ -90,7 +90,6 @@ const App: React.FC = () => {
     }
   };
 
-  // ✅ updated to handle subjects[]
   const getAvailableTeachers = useCallback((day: string, time: string, subIndex: number): Teacher[] => {
     const upperCaseDay = day.toUpperCase();
 
@@ -194,26 +193,27 @@ const App: React.FC = () => {
     try {
       const plan = await generateSubstitutionPlan(absentTeachersWithData, TEACHERS, TIMETABLE, dayName);
 
-      // ✅ conflict resolution updated for subjects[]
+      // Resolve double-booking conflicts + ensure one class/time gets one sub only
       const resolvedPlan: Substitution[] = [];
       const assignmentsByTime: Record<string, Set<string>> = {};
-      const seenSlot = new Set<string>();
+      const seenSlot = new Set<string>(); // day|time|class to ensure single replacement
 
       plan.sort((a, b) => a.time.localeCompare(b.time));
 
       for (const sub of plan) {
         const slotKey = `${sub.day}|${sub.time}|${sub.class}`;
-        if (seenSlot.has(slotKey)) continue;
+        if (seenSlot.has(slotKey)) {
+          continue; // only one substitute per slot even if multiple teachers absent
+        }
 
         const { time, day } = sub;
         if (!assignmentsByTime[time]) assignmentsByTime[time] = new Set<string>();
         const assignedSubstitutesForSlot = assignmentsByTime[time];
 
         if (sub.substituteTeacherId !== 'LAIN_LAIN' && assignedSubstitutesForSlot.has(sub.substituteTeacherId)) {
+          // Conflict: pick alternative
           const busyNow = new Set([
-            ...TIMETABLE
-              .filter(e => e.day.toUpperCase() === day.toUpperCase() && e.time === time)
-              .flatMap(e => e.subjects.map(s => s.teacherId)),
+            ...TIMETABLE.filter(e => e.day.toUpperCase() === day.toUpperCase() && e.time === time).flatMap(e => e.subjects.map(s => s.teacherId)),
             ...absentTeachersWithData.map(t => t.teacher.id),
             ...assignedSubstitutesForSlot
           ]);
@@ -253,6 +253,7 @@ const App: React.FC = () => {
       setSubstitutionPlan(resolvedPlan);
       setReportInfo({ date: dateObj, day: dayName, absentTeachers: absentTeachersForReport });
 
+      // Save immediately
       localStorage.setItem('substitutionPlan', JSON.stringify(resolvedPlan));
       localStorage.setItem('reportInfo', JSON.stringify({
         date: dateObj.toISOString(),
@@ -267,7 +268,7 @@ const App: React.FC = () => {
     }
   }, [absentTeachers, absenceDate]);
 
-  // PDF function unchanged
+  // PDF download
   const handleDownloadPdf = async () => {
     const content = pdfContentRef.current;
     if (!content) return;
@@ -373,10 +374,116 @@ const App: React.FC = () => {
           </div>
         </header>
 
-        {/* rest of your UI unchanged */}
-        {/* ... your form and substitution table ... */}
+        <main>
+          <div className="bg-white p-8 rounded-xl shadow-lg border border-slate-200">
+            <form onSubmit={handleSubmit}>
+              {/* Inputs for date, preparer, absent teachers */}
+              {/* ... same as before */}
+            </form>
+          </div>
+
+          <div className="mt-10">
+            {isLoading && <LoadingSpinner />}
+            {error && (
+              <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-md" role="alert">
+                <p className="font-bold">Ralat</p>
+                <p>{error}</p>
+              </div>
+            )}
+
+            {substitutionPlan && (
+              <div>
+                {/* Table of substitution plan */}
+                <div ref={pdfContentRef} className="p-4 bg-white rounded-xl shadow-lg border border-slate-200">
+                  {substitutionPlan.length > 0 ? (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm text-left">
+                        <thead className="bg-slate-100 text-slate-600 uppercase">
+                          <tr>
+                            <th className="px-4 py-3 font-semibold">Masa</th>
+                            <th className="px-4 py-3 font-semibold">Kelas</th>
+                            <th className="px-4 py-3 font-semibold">Subjek</th>
+                            <th className="px-4 py-3 font-semibold">Guru Tidak Hadir</th>
+                            <th className="px-4 py-3 font-semibold">Guru Ganti</th>
+                          </tr>
+                        </thead>
+                        <tbody className="text-slate-700">
+                          {substitutionPlan.map((sub, index) => (
+                            <tr key={`${sub.day}-${sub.time}-${sub.class}-${index}`} className="border-b border-slate-200 hover:bg-slate-50">
+                              <td className="px-4 py-3 font-mono">{sub.time}</td>
+                              <td className="px-4 py-3 font-medium">{sub.class}</td>
+                              <td className="px-4 py-3">{sub.subject}</td>
+                              <td className="px-4 py-3 text-slate-500">
+                                {sub.absentTeachers && sub.absentTeachers.length > 0
+                                  ? sub.absentTeachers.map((t) => t.name).join(", ")
+                                  : "Tiada"}
+                              </td>
+                              <td className="px-4 py-3">
+                                {isEditing ? (
+                                  <div>
+                                    <select
+                                      value={sub.substituteTeacherId}
+                                      onChange={(e) => handleSubstituteChange(index, e.target.value)}
+                                      className="block w-full px-2 py-1 bg-white border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500 transition text-emerald-700 font-semibold"
+                                    >
+                                      {!getAvailableTeachers(sub.day, sub.time, index).some(
+                                        (t) => t.id === sub.substituteTeacherId
+                                      ) &&
+                                        sub.substituteTeacherId !== "LAIN_LAIN" && (
+                                          <option
+                                            key={sub.substituteTeacherId}
+                                            value={sub.substituteTeacherId}
+                                          >
+                                            {sub.substituteTeacherName}
+                                          </option>
+                                        )}
+                                      {getAvailableTeachers(sub.day, sub.time, index).map((teacher) => (
+                                        <option key={teacher.id} value={teacher.id}>
+                                          {teacher.name}
+                                        </option>
+                                      ))}
+                                      <option value="LAIN_LAIN">Lain-lain</option>
+                                    </select>
+                                    {sub.substituteTeacherId === "LAIN_LAIN" && (
+                                      <input
+                                        type="text"
+                                        value={sub.substituteTeacherName}
+                                        onChange={(e) =>
+                                          handleCustomSubstituteNameChange(index, e.target.value)
+                                        }
+                                        placeholder="Masukkan nama pengganti"
+                                        className="mt-2 block w-full px-2 py-1 bg-white border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-sky-500 text-emerald-700 font-semibold"
+                                        aria-label="Nama Guru Ganti Lain-lain"
+                                      />
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="font-semibold text-emerald-700">
+                                    {sub.substituteTeacherName ||
+                                      (sub.substituteTeacherId === "LAIN_LAIN"
+                                        ? "(Nama belum diisi)"
+                                        : "")}
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="text-center p-8">
+                      <p className="text-slate-600">Tiada kelas yang perlu diganti untuk guru ini pada hari tersebut.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </main>
       </div>
 
+      {/* Schedule Modal */}
       <ScheduleModal isOpen={isScheduleOpen} onClose={() => setIsScheduleOpen(false)} />
     </div>
   );
