@@ -14,7 +14,6 @@ export const TEACHERS: Teacher[] = [
   { id: 'IM', name: 'Idrus bin Matjisin' },
   { id: 'NZ', name: 'Mohd Nazrin bin Ibrahim' },
   { id: 'AY', name: 'Amy Syahida binti Ahbasah' },
-  { id: 'MZ', name: 'Mohd Zamri' },
 ];
 
 const timeSlots = [
