@@ -43,7 +43,7 @@ const App: React.FC = () => {
   const [isScheduleOpen, setIsScheduleOpen] = useState<boolean>(false);
   const pdfContentRef = useRef<HTMLDivElement>(null);
 
-  // Load saved data on mount
+  // Load saved data
   useEffect(() => {
     try {
       const savedPlan = localStorage.getItem("substitutionPlan");
@@ -65,11 +65,10 @@ const App: React.FC = () => {
       }
       if (savedPreparer) setPreparerName(savedPreparer);
     } catch {
-      // ignore corrupt LS
+      // ignore
     }
   }, []);
 
-  // Persist plan + report when changed
   useEffect(() => {
     if (substitutionPlan && reportInfo) {
       localStorage.setItem("substitutionPlan", JSON.stringify(substitutionPlan));
@@ -83,7 +82,6 @@ const App: React.FC = () => {
     }
   }, [substitutionPlan, reportInfo]);
 
-  // Persist preparer name
   useEffect(() => {
     if (preparerName !== undefined) {
       localStorage.setItem("preparerName", preparerName);
@@ -181,8 +179,7 @@ const App: React.FC = () => {
   const handleSubmit = useCallback(
     async (event: React.FormEvent) => {
       event.preventDefault();
-      const hasEmptyTeacher = absentTeachers.some((t) => !t.id);
-      if (hasEmptyTeacher) {
+      if (absentTeachers.some((t) => !t.id)) {
         setError("Sila pilih seorang guru untuk setiap baris.");
         return;
       }
@@ -198,15 +195,7 @@ const App: React.FC = () => {
       setIsEditing(false);
 
       const dateObj = new Date(absenceDate + "T00:00:00");
-      const dayMap = [
-        "AHAD",
-        "ISNIN",
-        "SELASA",
-        "RABU",
-        "KHAMIS",
-        "JUMAAT",
-        "SABTU",
-      ];
+      const dayMap = ["AHAD", "ISNIN", "SELASA", "RABU", "KHAMIS", "JUMAAT", "SABTU"];
       const dayName = dayMap[dateObj.getDay()];
 
       if (dayName === "SABTU" || dayName === "AHAD") {
@@ -251,23 +240,57 @@ const App: React.FC = () => {
     [absentTeachers, absenceDate]
   );
 
-  // PDF generation
-  const handleDownloadPdf = async () => {
-    const content = pdfContentRef.current;
-    if (!content) return;
-    try {
-      const canvas = await html2canvas(content, { scale: 2 });
-      const imgData = canvas.toDataURL("image/png");
-      const pdf = new jsPDF("p", "pt", "a4");
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const imgProps = (pdf as any).getImageProperties(imgData);
-      const imgHeight = (imgProps.height * pdfWidth) / imgProps.width;
-      pdf.addImage(imgData, "PNG", 0, 0, pdfWidth, imgHeight);
-      pdf.save("pelan-guru-ganti.pdf");
-    } catch (e) {
-      console.error("PDF error:", e);
+// PDF generation (multi-page, header stays only on first page)
+const handleDownloadPdf = async () => {
+  const content = pdfContentRef.current;
+  if (!content) return;
+
+  try {
+    const pdf = new jsPDF("p", "pt", "a4");
+    const pdfWidth = pdf.internal.pageSize.getWidth();
+    const pdfHeight = pdf.internal.pageSize.getHeight();
+
+    // Render the whole block (header + table)
+    const canvas = await html2canvas(content, { scale: 2 });
+    const imgData = canvas.toDataURL("image/png");
+
+    const imgProps = (pdf as any).getImageProperties(imgData);
+    const imgHeight = (imgProps.height * pdfWidth) / imgProps.width;
+
+    let heightLeft = imgHeight;
+    let position = 0;
+
+    // Add first page
+    pdf.addImage(imgData, "PNG", 0, position, pdfWidth, imgHeight);
+    heightLeft -= pdfHeight;
+
+    // Continue only the overflowing table part to extra pages
+    while (heightLeft > 0) {
+      position = heightLeft - imgHeight;
+      pdf.addPage();
+      pdf.addImage(imgData, "PNG", 0, position, pdfWidth, imgHeight);
+      heightLeft -= pdfHeight;
     }
-  };
+
+    // Footer on every page
+    const pageCount = pdf.getNumberOfPages();
+    pdf.setFontSize(10);
+    for (let i = 1; i <= pageCount; i++) {
+      pdf.setPage(i);
+      pdf.text(
+        "Dijana menggunakan Sistem Guru Ganti SK Long Sebangang",
+        pdfWidth / 2,
+        pdfHeight - 20,
+        { align: "center" }
+      );
+    }
+
+    pdf.save("pelan-guru-ganti.pdf");
+  } catch (e) {
+    console.error("PDF error:", e);
+  }
+};
+
 
   const selectedTeacherIds = new Set(absentTeachers.map((t) => t.id).filter((id) => id));
 
@@ -382,96 +405,102 @@ const App: React.FC = () => {
             {isLoading && <LoadingSpinner />}
             {error && <div className="text-red-600">{error}</div>}
             {substitutionPlan && (
-              <div ref={pdfContentRef} className="bg-white p-6 rounded shadow space-y-4">
-                
-                {/* Report Metadata */}
+              <div ref={pdfContentRef} className="bg-white p-4 rounded shadow">
                 {reportInfo && (
-                  <div className="border-b pb-4">
-                    <h2 className="text-xl font-bold mb-2">Pelan Guru Ganti</h2>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
-                      <div>
-                        <p className="font-semibold text-slate-600">Disediakan Oleh:</p>
-                        <p className="text-black font-medium">
-                          {preparerName || "Tidak Dinyatakan"}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="font-semibold text-slate-600">Tarikh:</p>
-                        <p className="text-black font-medium">
-                          {reportInfo.date.toLocaleDateString("ms-MY", {
-                            day: "numeric",
-                            month: "long",
-                            year: "numeric",
-                          })}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="font-semibold text-slate-600">Hari:</p>
-                        <p className="text-black font-medium">{reportInfo.day}</p>
-                      </div>
-                    </div>
-
-                    <div className="mt-3">
-                      <p className="font-semibold text-slate-600 text-sm">
-                        Senarai Guru Tidak Hadir:
-                      </p>
-                      <ul className="mt-1 text-sm list-disc list-inside">
-                        {reportInfo.absentTeachers.map((t, idx) => (
-                          <li key={idx} className="text-black font-medium">
-                            {t.name}{" "}
-                            <span className="text-slate-500 font-normal">({t.reason})</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
+                  <div className="mb-4 text-sm text-slate-700">
+                    <p>
+                      <strong>Disediakan Oleh:</strong> {preparerName || "Tidak dinyatakan"}
+                    </p>
+                    <p>
+                      <strong>Tarikh:</strong>{" "}
+                      {reportInfo.date.toLocaleDateString("ms-MY", {
+                        day: "numeric",
+                        month: "long",
+                        year: "numeric",
+                      })}
+                    </p>
+                    <p>
+                      <strong>Hari:</strong>{" "}
+                      {reportInfo.date.toLocaleDateString("ms-MY", { weekday: "long" })}
+                    </p>
+                    <p className="mt-2">
+                      <strong>Guru Tidak Hadir:</strong>{" "}
+                      {reportInfo.absentTeachers.length > 0
+                        ? reportInfo.absentTeachers
+                            .map((t) => `${t.name} (${t.reason})`)
+                            .join(", ")
+                        : "Tiada"}
+                    </p>
                   </div>
                 )}
 
-                {/* Substitution Table */}
-                <div className="overflow-x-auto">
-                  <table className="w-full border">
-                    <thead>
-                      <tr className="bg-slate-100">
-                        <th className="px-3 py-2 border">Masa</th>
-                        <th className="px-3 py-2 border">Kelas</th>
-                        <th className="px-3 py-2 border">Subjek</th>
-                        <th className="px-3 py-2 border">Guru Tidak Hadir</th>
-                        <th className="px-3 py-2 border">Guru Ganti</th>
+                <h2 className="text-xl font-bold mb-4">Pelan Guru Ganti</h2>
+                <table className="w-full border">
+                  <thead>
+                    <tr className="bg-slate-100">
+                      <th className="px-3 py-2 border">Masa</th>
+                      <th className="px-3 py-2 border">Kelas</th>
+                      <th className="px-3 py-2 border">Subjek</th>
+                      <th className="px-3 py-2 border">Guru Tidak Hadir</th>
+                      <th className="px-3 py-2 border">Guru Ganti</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {substitutionPlan.map((sub, i) => (
+                      <tr key={i}>
+                        <td className="px-3 py-2 border">{sub.time}</td>
+                        <td className="px-3 py-2 border">{sub.class}</td>
+                        <td className="px-3 py-2 border">{sub.subject}</td>
+                        <td className="px-3 py-2 border">
+                          {sub.absentTeachers?.length
+                            ? sub.absentTeachers.map((t) => t.name).join(", ")
+                            : "Tiada"}
+                        </td>
+                        <td className="px-3 py-2 border">
+                          <select
+                            value={sub.substituteTeacherId}
+                            onChange={(e) => handleSubstituteChange(i, e.target.value)}
+                            className="border rounded px-2 py-1 w-full"
+                          >
+                            <option value="">(Belum ditentukan)</option>
+                            {getAvailableTeachers(sub.day, sub.time, i).map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {t.name}
+                              </option>
+                            ))}
+                            <option value="LAIN_LAIN">LAIN-LAIN</option>
+                          </select>
+
+                          {sub.substituteTeacherId === "LAIN_LAIN" && (
+                            <input
+                              type="text"
+                              placeholder="Nama guru lain"
+                              value={sub.substituteTeacherName || ""}
+                              onChange={(e) =>
+                                handleCustomSubstituteNameChange(i, e.target.value)
+                              }
+                              className="mt-1 border rounded px-2 py-1 w-full"
+                            />
+                          )}
+
+                          {sub.substituteTeacherId !== "" && (
+                            <div className="mt-1 text-emerald-700 font-semibold">
+                              {sub.substituteTeacherId === "LAIN_LAIN"
+                                ? sub.substituteTeacherName || "(Belum diisi)"
+                                : sub.substituteTeacherName}
+                            </div>
+                          )}
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {substitutionPlan.map((sub, i) => (
-                        <tr key={i}>
-                          <td className="px-3 py-2 border">{sub.time}</td>
-                          <td className="px-3 py-2 border">{sub.class}</td>
-                          <td className="px-3 py-2 border">{sub.subject}</td>
-                          <td className="px-3 py-2 border">
-                            {sub.absentTeachers?.length
-                              ? sub.absentTeachers.map((t) => t.name).join(", ")
-                              : "Tiada"}
-                          </td>
-                          <td className="px-3 py-2 border text-emerald-700 font-semibold">
-                            {sub.substituteTeacherName || "(Belum ditentukan)"}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Footer */}
-                <div className="pt-4 text-center text-xs text-slate-500">
-                  Dijana menggunakan <b>Sistem Guru Ganti SK Long Sebangang</b>
-                </div>
-
-                <div className="mt-4 flex justify-end">
-                  <button
-                    onClick={handleDownloadPdf}
-                    className="px-4 py-2 bg-emerald-600 text-white rounded-lg shadow hover:bg-emerald-700 transition"
-                  >
-                    Muat Turun PDF
-                  </button>
-                </div>
+                    ))}
+                  </tbody>
+                </table>
+                <button
+                  onClick={handleDownloadPdf}
+                  className="mt-4 bg-emerald-600 text-white px-3 py-2 rounded"
+                >
+                  Muat Turun PDF
+                </button>
               </div>
             )}
           </div>
