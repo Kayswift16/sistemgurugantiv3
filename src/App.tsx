@@ -34,6 +34,7 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [substitutionPlan, setSubstitutionPlan] = useState<Substitution[] | null>(null);
+  const [finalizedPlan, setFinalizedPlan] = useState<Substitution[] | null>(null);
   const [reportInfo, setReportInfo] = useState<{
     date: Date;
     day: string;
@@ -47,21 +48,20 @@ const App: React.FC = () => {
   useEffect(() => {
     try {
       const savedPlan = localStorage.getItem("substitutionPlan");
+      const savedFinal = localStorage.getItem("finalizedPlan");
       const savedReport = localStorage.getItem("reportInfo");
       const savedPreparer = localStorage.getItem("preparerName");
 
-      if (savedPlan && savedReport) {
-        const plan: Substitution[] = JSON.parse(savedPlan);
+      if (savedPlan) setSubstitutionPlan(JSON.parse(savedPlan));
+      if (savedFinal) setFinalizedPlan(JSON.parse(savedFinal));
+
+      if (savedReport) {
         const rawReport = JSON.parse(savedReport) as {
           date: string;
           day: string;
           absentTeachers: { name: string; reason: string }[];
         };
-        setSubstitutionPlan(plan);
-        setReportInfo({
-          ...rawReport,
-          date: new Date(rawReport.date),
-        });
+        setReportInfo({ ...rawReport, date: new Date(rawReport.date) });
       }
       if (savedPreparer) setPreparerName(savedPreparer);
     } catch {
@@ -69,21 +69,30 @@ const App: React.FC = () => {
     }
   }, []);
 
+  // Persist
   useEffect(() => {
-    if (substitutionPlan && reportInfo) {
+    if (substitutionPlan) {
       localStorage.setItem("substitutionPlan", JSON.stringify(substitutionPlan));
-      localStorage.setItem(
-        "reportInfo",
-        JSON.stringify({
-          ...reportInfo,
-          date: reportInfo.date.toISOString(),
-        })
-      );
     }
-  }, [substitutionPlan, reportInfo]);
+  }, [substitutionPlan]);
 
   useEffect(() => {
-    if (preparerName !== undefined) {
+    if (finalizedPlan) {
+      localStorage.setItem("finalizedPlan", JSON.stringify(finalizedPlan));
+    }
+  }, [finalizedPlan]);
+
+  useEffect(() => {
+    if (reportInfo) {
+      localStorage.setItem(
+        "reportInfo",
+        JSON.stringify({ ...reportInfo, date: reportInfo.date.toISOString() })
+      );
+    }
+  }, [reportInfo]);
+
+  useEffect(() => {
+    if (preparerName) {
       localStorage.setItem("preparerName", preparerName);
     }
   }, [preparerName]);
@@ -95,10 +104,7 @@ const App: React.FC = () => {
   };
 
   const addTeacher = () => {
-    setAbsentTeachers([
-      ...absentTeachers,
-      { key: `teacher-${Date.now()}`, id: "", reason: "" },
-    ]);
+    setAbsentTeachers([...absentTeachers, { key: `teacher-${Date.now()}`, id: "", reason: "" }]);
   };
 
   const removeTeacher = (index: number) => {
@@ -122,12 +128,7 @@ const App: React.FC = () => {
 
       const alreadySubstitutingIds = new Set(
         substitutionPlan
-          ?.filter(
-            (s, i) =>
-              s.time === time &&
-              i !== subIndex &&
-              s.substituteTeacherId !== "LAIN_LAIN"
-          )
+          ?.filter((s, i) => s.time === time && i !== subIndex && s.substituteTeacherId !== "LAIN_LAIN")
           .map((s) => s.substituteTeacherId)
       );
 
@@ -169,10 +170,7 @@ const App: React.FC = () => {
   const handleCustomSubstituteNameChange = (subIndex: number, newName: string) => {
     if (!substitutionPlan) return;
     const newPlan = [...substitutionPlan];
-    newPlan[subIndex] = {
-      ...newPlan[subIndex],
-      substituteTeacherName: newName,
-    };
+    newPlan[subIndex] = { ...newPlan[subIndex], substituteTeacherName: newName };
     setSubstitutionPlan(newPlan);
   };
 
@@ -191,6 +189,7 @@ const App: React.FC = () => {
       setIsLoading(true);
       setError(null);
       setSubstitutionPlan(null);
+      setFinalizedPlan(null);
       setReportInfo(null);
       setIsEditing(false);
 
@@ -199,7 +198,7 @@ const App: React.FC = () => {
       const dayName = dayMap[dateObj.getDay()];
 
       if (dayName === "SABTU" || dayName === "AHAD") {
-        setError("Hari yang dipilih ialah hujung minggu. Sila pilih hari persekolahan.");
+        setError("Hari yang dipilih ialah hujung minggu.");
         setIsLoading(false);
         return;
       }
@@ -211,26 +210,19 @@ const App: React.FC = () => {
         }))
         .filter((item) => item.teacher);
 
-      if (absentTeachersWithData.length === 0) {
-        setError("Guru yang dipilih tidak ditemui.");
-        setIsLoading(false);
-        return;
-      }
-
       try {
-        const plan = await generateSubstitutionPlan(
-          absentTeachersWithData,
-          TEACHERS,
-          TIMETABLE,
-          dayName
-        );
-
+        const plan = await generateSubstitutionPlan(absentTeachersWithData, TEACHERS, TIMETABLE, dayName);
         setSubstitutionPlan(plan);
-        const absentTeachersForReport = absentTeachersWithData.map((t) => ({
-          name: t.teacher.name,
-          reason: t.reason,
-        }));
-        setReportInfo({ date: dateObj, day: dayName, absentTeachers: absentTeachersForReport });
+
+        setReportInfo({
+          date: dateObj,
+          day: dayName,
+          absentTeachers: absentTeachersWithData.map((t) => ({
+            name: t.teacher.name,
+            reason: t.reason,
+          })),
+        });
+        setIsEditing(true); // allow editing immediately
       } catch (err: any) {
         setError(err.message || "Ralat tidak dijangka berlaku.");
       } finally {
@@ -240,57 +232,56 @@ const App: React.FC = () => {
     [absentTeachers, absenceDate]
   );
 
-// PDF generation (multi-page, header stays only on first page)
-const handleDownloadPdf = async () => {
-  const content = pdfContentRef.current;
-  if (!content) return;
+  // Save finalized plan
+  const handleSaveFinalPlan = () => {
+    if (substitutionPlan) {
+      setFinalizedPlan(substitutionPlan);
+      setIsEditing(false);
+    }
+  };
 
-  try {
-    const pdf = new jsPDF("p", "pt", "a4");
-    const pdfWidth = pdf.internal.pageSize.getWidth();
-    const pdfHeight = pdf.internal.pageSize.getHeight();
+  // PDF generation from finalizedPlan only
+  const handleDownloadPdf = async () => {
+    const content = pdfContentRef.current;
+    if (!content) return;
+    try {
+      const canvas = await html2canvas(content, { scale: 2, useCORS: true });
+      const imgData = canvas.toDataURL("image/png");
+      const pdf = new jsPDF("p", "pt", "a4");
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+      const imgProps = (pdf as any).getImageProperties(imgData);
+      const imgHeight = (imgProps.height * pdfWidth) / imgProps.width;
 
-    // Render the whole block (header + table)
-    const canvas = await html2canvas(content, { scale: 2 });
-    const imgData = canvas.toDataURL("image/png");
-
-    const imgProps = (pdf as any).getImageProperties(imgData);
-    const imgHeight = (imgProps.height * pdfWidth) / imgProps.width;
-
-    let heightLeft = imgHeight;
-    let position = 0;
-
-    // Add first page
-    pdf.addImage(imgData, "PNG", 0, position, pdfWidth, imgHeight);
-    heightLeft -= pdfHeight;
-
-    // Continue only the overflowing table part to extra pages
-    while (heightLeft > 0) {
-      position = heightLeft - imgHeight;
-      pdf.addPage();
+      let heightLeft = imgHeight;
+      let position = 0;
       pdf.addImage(imgData, "PNG", 0, position, pdfWidth, imgHeight);
       heightLeft -= pdfHeight;
+
+      while (heightLeft > 0) {
+        position = heightLeft - imgHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, "PNG", 0, position, pdfWidth, imgHeight);
+        heightLeft -= pdfHeight;
+      }
+
+      // Footer
+      const pageCount = pdf.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        pdf.setPage(i);
+        pdf.setFontSize(8);
+        pdf.setTextColor(128);
+        const footerText = "Dijana menggunakan Sistem Guru Ganti SK Long Sebangang";
+        const textWidth =
+          (pdf.getStringUnitWidth(footerText) * pdf.getFontSize()) / (pdf as any).internal.scaleFactor;
+        pdf.text(footerText, (pdfWidth - textWidth) / 2, pdfHeight - 10);
+      }
+
+      pdf.save("pelan-guru-ganti.pdf");
+    } catch (e) {
+      console.error("PDF error:", e);
     }
-
-    // Footer on every page
-    const pageCount = pdf.getNumberOfPages();
-    pdf.setFontSize(10);
-    for (let i = 1; i <= pageCount; i++) {
-      pdf.setPage(i);
-      pdf.text(
-        "Dijana menggunakan Sistem Guru Ganti SK Long Sebangang",
-        pdfWidth / 2,
-        pdfHeight - 20,
-        { align: "center" }
-      );
-    }
-
-    pdf.save("pelan-guru-ganti.pdf");
-  } catch (e) {
-    console.error("PDF error:", e);
-  }
-};
-
+  };
 
   const selectedTeacherIds = new Set(absentTeachers.map((t) => t.id).filter((id) => id));
 
@@ -300,13 +291,9 @@ const handleDownloadPdf = async () => {
         <header className="text-center mb-10">
           <div className="flex justify-center items-center gap-3 mb-2">
             <GraduationCapIcon className="w-10 h-10 text-sky-600" />
-            <h1 className="text-4xl font-bold text-slate-800">
-              Sistem Guru Ganti SK Long Sebangang
-            </h1>
+            <h1 className="text-4xl font-bold text-slate-800">Sistem Guru Ganti SK Long Sebangang</h1>
           </div>
-          <p className="text-lg text-slate-500">
-            Dikuasakan oleh AI untuk mencari pengganti yang paling sesuai.
-          </p>
+          <p className="text-lg text-slate-500">Dikuasakan oleh AI untuk mencari pengganti yang paling sesuai.</p>
           <div className="flex justify-center mt-4">
             <button
               onClick={() => setIsScheduleOpen(true)}
@@ -381,20 +368,12 @@ const handleDownloadPdf = async () => {
                     </button>
                   </div>
                 ))}
-                <button
-                  type="button"
-                  onClick={addTeacher}
-                  className="mt-2 px-3 py-1 border rounded"
-                >
+                <button type="button" onClick={addTeacher} className="mt-2 px-3 py-1 border rounded">
                   + Tambah Guru
                 </button>
               </div>
 
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="mt-6 w-full bg-sky-600 text-white py-2 rounded"
-              >
+              <button type="submit" disabled={isLoading} className="mt-6 w-full bg-sky-600 text-white py-2 rounded">
                 {isLoading ? "Menjana..." : "Jana Pelan Guru Ganti"}
               </button>
             </form>
@@ -404,37 +383,11 @@ const handleDownloadPdf = async () => {
           <div className="mt-10">
             {isLoading && <LoadingSpinner />}
             {error && <div className="text-red-600">{error}</div>}
-            {substitutionPlan && (
-              <div ref={pdfContentRef} className="bg-white p-4 rounded shadow">
-                {reportInfo && (
-                  <div className="mb-4 text-sm text-slate-700">
-                    <p>
-                      <strong>Disediakan Oleh:</strong> {preparerName || "Tidak dinyatakan"}
-                    </p>
-                    <p>
-                      <strong>Tarikh:</strong>{" "}
-                      {reportInfo.date.toLocaleDateString("ms-MY", {
-                        day: "numeric",
-                        month: "long",
-                        year: "numeric",
-                      })}
-                    </p>
-                    <p>
-                      <strong>Hari:</strong>{" "}
-                      {reportInfo.date.toLocaleDateString("ms-MY", { weekday: "long" })}
-                    </p>
-                    <p className="mt-2">
-                      <strong>Guru Tidak Hadir:</strong>{" "}
-                      {reportInfo.absentTeachers.length > 0
-                        ? reportInfo.absentTeachers
-                            .map((t) => `${t.name} (${t.reason})`)
-                            .join(", ")
-                        : "Tiada"}
-                    </p>
-                  </div>
-                )}
 
-                <h2 className="text-xl font-bold mb-4">Pelan Guru Ganti</h2>
+            {/* Editable Plan */}
+            {substitutionPlan && isEditing && (
+              <div className="bg-white p-4 rounded shadow mb-6">
+                <h2 className="text-xl font-bold mb-4">Ubah Pelan Guru Ganti</h2>
                 <table className="w-full border">
                   <thead>
                     <tr className="bg-slate-100">
@@ -468,27 +421,16 @@ const handleDownloadPdf = async () => {
                                 {t.name}
                               </option>
                             ))}
-                            <option value="LAIN_LAIN">LAIN-LAIN</option>
+                            <option value="LAIN_LAIN">Lain-lain</option>
                           </select>
-
                           {sub.substituteTeacherId === "LAIN_LAIN" && (
                             <input
                               type="text"
-                              placeholder="Nama guru lain"
-                              value={sub.substituteTeacherName || ""}
-                              onChange={(e) =>
-                                handleCustomSubstituteNameChange(i, e.target.value)
-                              }
+                              placeholder="Nama guru ganti"
+                              value={sub.substituteTeacherName}
+                              onChange={(e) => handleCustomSubstituteNameChange(i, e.target.value)}
                               className="mt-1 border rounded px-2 py-1 w-full"
                             />
-                          )}
-
-                          {sub.substituteTeacherId !== "" && (
-                            <div className="mt-1 text-emerald-700 font-semibold">
-                              {sub.substituteTeacherId === "LAIN_LAIN"
-                                ? sub.substituteTeacherName || "(Belum diisi)"
-                                : sub.substituteTeacherName}
-                            </div>
                           )}
                         </td>
                       </tr>
@@ -496,8 +438,68 @@ const handleDownloadPdf = async () => {
                   </tbody>
                 </table>
                 <button
-                  onClick={handleDownloadPdf}
+                  onClick={handleSaveFinalPlan}
                   className="mt-4 bg-emerald-600 text-white px-3 py-2 rounded"
+                >
+                  Simpan
+                </button>
+              </div>
+            )}
+
+            {/* Finalized Plan (for PDF) */}
+            {finalizedPlan && reportInfo && (
+              <div ref={pdfContentRef} className="bg-white p-6 rounded shadow">
+                <h2 className="text-xl font-bold mb-4">Pelan Guru Ganti</h2>
+
+                <p className="mb-2 text-sm">
+                  <span className="font-semibold">Tarikh:</span>{" "}
+                  {reportInfo.date.toLocaleDateString("ms-MY")} ({reportInfo.day})
+                </p>
+                <p className="mb-4 text-sm">
+                  <span className="font-semibold">Disediakan oleh:</span> {preparerName || "-"}
+                </p>
+
+                <h3 className="font-semibold mb-2">Senarai Guru Tidak Hadir</h3>
+                <ul className="list-disc pl-6 mb-4 text-sm">
+                  {reportInfo.absentTeachers.map((t, i) => (
+                    <li key={i}>
+                      {t.name} – {t.reason}
+                    </li>
+                  ))}
+                </ul>
+
+                <table className="w-full border">
+                  <thead>
+                    <tr className="bg-slate-100">
+                      <th className="px-3 py-2 border">Masa</th>
+                      <th className="px-3 py-2 border">Kelas</th>
+                      <th className="px-3 py-2 border">Subjek</th>
+                      <th className="px-3 py-2 border">Guru Tidak Hadir</th>
+                      <th className="px-3 py-2 border">Guru Ganti</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {finalizedPlan.map((sub, i) => (
+                      <tr key={i}>
+                        <td className="px-3 py-2 border">{sub.time}</td>
+                        <td className="px-3 py-2 border">{sub.class}</td>
+                        <td className="px-3 py-2 border">{sub.subject}</td>
+                        <td className="px-3 py-2 border">
+                          {sub.absentTeachers?.length
+                            ? sub.absentTeachers.map((t) => t.name).join(", ")
+                            : "Tiada"}
+                        </td>
+                        <td className="px-3 py-2 border text-emerald-700 font-semibold">
+                          {sub.substituteTeacherName || "(Belum ditentukan)"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+
+                <button
+                  onClick={handleDownloadPdf}
+                  className="mt-4 bg-sky-600 text-white px-3 py-2 rounded"
                 >
                   Muat Turun PDF
                 </button>
