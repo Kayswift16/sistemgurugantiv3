@@ -242,14 +242,6 @@ const App: React.FC = () => {
           reason: t.reason,
         }));
         setReportInfo({ date: dateObj, day: dayName, absentTeachers: absentTeachersForReport });
-
-        // persist
-        localStorage.setItem('substitutionPlan', JSON.stringify(plan));
-        localStorage.setItem('reportInfo', JSON.stringify({
-          date: dateObj.toISOString(),
-          day: dayName,
-          absentTeachers: absentTeachersForReport
-        }));
       } catch (err: any) {
         setError(err.message || "Ralat tidak dijangka berlaku.");
       } finally {
@@ -259,65 +251,21 @@ const App: React.FC = () => {
     [absentTeachers, absenceDate]
   );
 
-  // Improved PDF generation: paginate + footer + include report metadata
+  // PDF generation
   const handleDownloadPdf = async () => {
     const content = pdfContentRef.current;
     if (!content) return;
-
     try {
-      // ensure any edits finish
-      if (isEditing) setIsEditing(false);
-
-      const canvas = await html2canvas(content, {
-        scale: 2,
-        useCORS: true,
-      });
-
+      const canvas = await html2canvas(content, { scale: 2 });
       const imgData = canvas.toDataURL("image/png");
       const pdf = new jsPDF("p", "pt", "a4");
       const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = pdf.internal.pageSize.getHeight();
-
-      // Calculate image height to fit pdf width
-      const ratio = pdfWidth / canvas.width;
-      const imgHeight = canvas.height * ratio;
-
-      let position = 0;
-      pdf.addImage(imgData, "PNG", 0, position, pdfWidth, imgHeight);
-
-      let remaining = imgHeight - pdfHeight;
-
-      // add pages while there's remaining content
-      while (remaining > -0.5) { // small tolerance
-        position -= pdfHeight;
-        pdf.addPage();
-        pdf.addImage(imgData, "PNG", 0, position, pdfWidth, imgHeight);
-        remaining -= pdfHeight;
-      }
-
-      // add footer to every page
-      const footerText = "Dijana menggunakan Sistem Guru Ganti SK Long Sebangang";
-      const pageCount = pdf.getNumberOfPages();
-      for (let i = 1; i <= pageCount; i++) {
-        pdf.setPage(i);
-        pdf.setFontSize(8);
-        pdf.setTextColor(120, 120, 120);
-        const pw = pdf.internal.pageSize.getWidth();
-        const textWidth = pdf.getStringUnitWidth(footerText) * (pdf.getFontSize() / (pdf as any).internal.scaleFactor);
-        const x = (pw - textWidth) / 2;
-        pdf.text(footerText, x, pdf.internal.pageSize.getHeight() - 20);
-      }
-
-      // try save, fallback to open in new tab if browser blocks download
-      try {
-        pdf.save("pelan-guru-ganti.pdf");
-      } catch {
-        const blobUrl = pdf.output('bloburl');
-        window.open(blobUrl, "_blank");
-      }
+      const imgProps = (pdf as any).getImageProperties(imgData);
+      const imgHeight = (imgProps.height * pdfWidth) / imgProps.width;
+      pdf.addImage(imgData, "PNG", 0, 0, pdfWidth, imgHeight);
+      pdf.save("pelan-guru-ganti.pdf");
     } catch (e) {
       console.error("PDF error:", e);
-      setError("Tidak dapat menjana PDF. Sila cuba lagi.");
     }
   };
 
@@ -434,19 +382,28 @@ const App: React.FC = () => {
             {isLoading && <LoadingSpinner />}
             {error && <div className="text-red-600">{error}</div>}
             {substitutionPlan && (
-              <div ref={pdfContentRef} className="bg-white p-4 rounded shadow">
-                {/* --- Report header included in canvas (so it appears in PDF) --- */}
+              <div ref={pdfContentRef} className="bg-white p-6 rounded shadow space-y-4">
+                
+                {/* Report Metadata */}
                 {reportInfo && (
-                  <div className="mb-4 p-3 border-b">
-                    <h3 className="text-lg font-bold mb-2">Jadual Guru Ganti</h3>
+                  <div className="border-b pb-4">
+                    <h2 className="text-xl font-bold mb-2">Pelan Guru Ganti</h2>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
                       <div>
                         <p className="font-semibold text-slate-600">Disediakan Oleh:</p>
-                        <p className="text-black font-medium">{preparerName || "Tidak Dinyatakan"}</p>
+                        <p className="text-black font-medium">
+                          {preparerName || "Tidak Dinyatakan"}
+                        </p>
                       </div>
                       <div>
                         <p className="font-semibold text-slate-600">Tarikh:</p>
-                        <p className="text-black font-medium">{reportInfo.date.toLocaleDateString('ms-MY', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+                        <p className="text-black font-medium">
+                          {reportInfo.date.toLocaleDateString("ms-MY", {
+                            day: "numeric",
+                            month: "long",
+                            year: "numeric",
+                          })}
+                        </p>
                       </div>
                       <div>
                         <p className="font-semibold text-slate-600">Hari:</p>
@@ -454,12 +411,15 @@ const App: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="mt-3 pt-3 border-t">
-                      <p className="font-semibold text-slate-600 text-sm">Senarai Guru Tidak Hadir:</p>
-                      <ul className="mt-1 text-sm">
+                    <div className="mt-3">
+                      <p className="font-semibold text-slate-600 text-sm">
+                        Senarai Guru Tidak Hadir:
+                      </p>
+                      <ul className="mt-1 text-sm list-disc list-inside">
                         {reportInfo.absentTeachers.map((t, idx) => (
                           <li key={idx} className="text-black font-medium">
-                            {idx + 1}. {t.name} <span className="text-slate-500 font-normal">({t.reason})</span>
+                            {t.name}{" "}
+                            <span className="text-slate-500 font-normal">({t.reason})</span>
                           </li>
                         ))}
                       </ul>
@@ -467,7 +427,7 @@ const App: React.FC = () => {
                   </div>
                 )}
 
-                {/* substitution table */}
+                {/* Substitution Table */}
                 <div className="overflow-x-auto">
                   <table className="w-full border">
                     <thead>
@@ -499,29 +459,24 @@ const App: React.FC = () => {
                   </table>
                 </div>
 
-                <div className="mt-4 flex justify-between items-center">
-                  <div className="text-sm text-slate-500">Disediakan oleh: {preparerName || "(tidak dinyatakan)"}</div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setIsEditing(!isEditing)}
-                      className="px-4 py-2 bg-yellow-500 text-white rounded-lg shadow hover:bg-yellow-600 transition"
-                    >
-                      {isEditing ? "Selesai Edit" : "Edit"}
-                    </button>
-                    <button
-                      onClick={handleDownloadPdf}
-                      className="px-4 py-2 bg-emerald-600 text-white rounded-lg shadow hover:bg-emerald-700 transition"
-                    >
-                      Muat Turun PDF
-                    </button>
-                  </div>
+                {/* Footer */}
+                <div className="pt-4 text-center text-xs text-slate-500">
+                  Dijana menggunakan <b>Sistem Guru Ganti SK Long Sebangang</b>
+                </div>
+
+                <div className="mt-4 flex justify-end">
+                  <button
+                    onClick={handleDownloadPdf}
+                    className="px-4 py-2 bg-emerald-600 text-white rounded-lg shadow hover:bg-emerald-700 transition"
+                  >
+                    Muat Turun PDF
+                  </button>
                 </div>
               </div>
             )}
           </div>
         </main>
       </div>
-
       <ScheduleModal isOpen={isScheduleOpen} onClose={() => setIsScheduleOpen(false)} />
     </div>
   );
