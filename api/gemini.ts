@@ -1,12 +1,13 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import type { Teacher, ScheduleEntry, Substitution } from '../src/types';
 
 if (!process.env.API_KEY) {
   throw new Error("API_KEY environment variable is not set");
 }
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Menggunakan SDK rasmi yang baru
+const genAI = new GoogleGenerativeAI(process.env.API_KEY);
 
 const generatePrompt = (
   absentTeachersInfo: { teacher: Teacher; reason: string }[],
@@ -29,15 +30,12 @@ const generatePrompt = (
     entry.subjects.some(s => absentTeacherIds.includes(s.teacherId))
   );
 
-  // ✅ Build compact teacher list
   const teacherList = allTeachers.map(t => `${t.id}:${t.name}`).join(", ");
 
-  // ✅ Build compact timetable for the day
   const timetableSummary = relevantTimetableForDay.map(e =>
     `${e.time} ${e.class} ${e.subjects.map(s => `${s.subject}/${s.teacherId}`).join(" ")}`
   ).join("; ");
 
-  // ✅ Build compact absent teacher schedule
   const absentSummary = absentTeachersSchedules.map(e =>
     `${e.time} ${e.class} ${e.subjects.map(s => `${s.subject}/${s.teacherId}`).join(" ")}`
   ).join("; ");
@@ -56,49 +54,37 @@ ${absentTeacherDetails}
 TUGASAN:
 1. Untuk SETIAP guru yang tidak hadir, kenal pasti semua slot waktu mengajar mereka.
 2. Guru yang berada dalam "Senarai Guru Tidak Hadir" TIDAK BOLEH dicadangkan sebagai guru ganti.
-3. Untuk setiap slot yang kosong, cari guru yang berkelapangan (tidak mempunyai kelas dan tidak termasuk dalam senarai guru tidak hadir).
-4. Jika satu slot mempunyai lebih daripada seorang guru (contoh: "PM/AY PI/IM"):
-   - Jika seorang sahaja yang tidak hadir → tetap perlu seorang guru ganti.
-   - Jika kedua-duanya tidak hadir → hanya seorang guru ganti diperlukan.
-   - Dalam laporan, senaraikan semua guru asal yang tidak hadir, tetapi cadangkan hanya seorang guru ganti.
-5. Keutamaan cadangan:
-   a. Guru yang mengajar subjek sama.
-   b. Guru yang mengajar di tahun sama.
-   c. Guru dengan beban waktu paling sedikit pada hari itu.
-6. Sediakan justifikasi ringkas untuk setiap cadangan.
-7. Kembalikan jawapan dalam format JSON SAHAJA ikut skema yang ditetapkan.
+3. Untuk setiap slot yang kosong, cari guru yang berkelapangan.
+4. Jika satu slot mempunyai lebih daripada seorang guru, cadangkan hanya seorang guru ganti.
+5. Keutamaan: Subjek sama > Tahun sama > Beban waktu sedikit.
+6. Kembalikan jawapan dalam format JSON SAHAJA ikut skema yang ditetapkan.
 
 Slot pengajaran guru tidak hadir (${absenceDay}):
 ${absentSummary}
 `;
 };
 
+// Skema JSON mengikut format SDK @google/generative-ai
 const responseSchema = {
-  type: Type.ARRAY,
+  type: SchemaType.ARRAY,
   items: {
-    type: Type.OBJECT,
+    type: SchemaType.OBJECT,
     properties: {
-      day: { type: Type.STRING },
-      time: { type: Type.STRING },
-      class: { type: Type.STRING },
-      subject: { type: Type.STRING },
+      day: { type: SchemaType.STRING },
+      time: { type: SchemaType.STRING },
+      class: { type: SchemaType.STRING },
+      subject: { type: SchemaType.STRING },
       absentTeachers: {
-        type: Type.ARRAY,
-        items: { type: Type.STRING }
+        type: SchemaType.ARRAY,
+        items: { type: SchemaType.STRING }
       },
-      substituteTeacherId: { type: Type.STRING },
-      substituteTeacherName: { type: Type.STRING },
-      justification: { type: Type.STRING },
+      substituteTeacherId: { type: SchemaType.STRING },
+      substituteTeacherName: { type: SchemaType.STRING },
+      justification: { type: SchemaType.STRING },
     },
     required: [
-      "day",
-      "time",
-      "class",
-      "subject",
-      "absentTeachers",
-      "substituteTeacherId",
-      "substituteTeacherName",
-      "justification"
+      "day", "time", "class", "subject", "absentTeachers", 
+      "substituteTeacherId", "substituteTeacherName", "justification"
     ]
   },
 };
@@ -113,25 +99,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { absentTeachersInfo, allTeachers, timetable, absenceDay } = req.body;
 
     if (!absentTeachersInfo || !allTeachers || !timetable || !absenceDay) {
-      return res.status(400).json({ error: "Missing required fields in the request body." });
+      return res.status(400).json({ error: "Missing required fields." });
     }
 
     const prompt = generatePrompt(absentTeachersInfo, allTeachers, timetable, absenceDay);
 
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: prompt,
-      config: {
+    // Menggunakan model 1.5-flash untuk kestabilan tinggi
+    const model = genAI.getGenerativeModel({ 
+      model: "gemini-1.5-flash",
+      generationConfig: {
         responseMimeType: "application/json",
         responseSchema: responseSchema,
-        temperature: 0.2,
-      },
+      }
     });
 
-    const jsonText = response.text.trim();
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const jsonText = response.text();
+    
     const rawResult = JSON.parse(jsonText) as any[];
 
-    const result: Substitution[] = rawResult.map(item => ({
+    const finalResult: Substitution[] = rawResult.map(item => ({
       ...item,
       absentTeachers: item.absentTeachers.map((name: string) => {
         const teacher = allTeachers.find(t => t.name === name);
@@ -139,11 +127,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }),
     }));
 
-    return res.status(200).json(result);
+    return res.status(200).json(finalResult);
 
   } catch (error) {
-    console.error("Error in Vercel function:", error);
-    const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
-    return res.status(500).json({ error: `Gagal menjana pelan guru ganti: ${errorMessage}` });
+    console.error("Error:", error);
+    const errorMessage = error instanceof Error ? error.message : "Ralat tidak diketahui.";
+    return res.status(500).json({ error: `Gagal menjana pelan: ${errorMessage}` });
   }
 }
